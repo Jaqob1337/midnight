@@ -4,12 +4,13 @@ import de.peter1337.midnight.Midnight;
 import de.peter1337.midnight.manager.ModuleManager;
 import de.peter1337.midnight.modules.Module;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
-import net.minecraft.text.Text;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.text.Text;
 
 public class CommandManager {
+
     public static void init() {
-        // Register event for when player sends a chat message
+        // Register an event for when the player sends a chat message
         ClientSendMessageEvents.ALLOW_CHAT.register(message -> {
             if (message.startsWith(".")) {
                 handleCommand(message);
@@ -25,7 +26,15 @@ public class CommandManager {
         String[] args = message.substring(1).trim().split(" ");
         if (args.length == 0) return;
 
-        // Handle bind command
+        // "help" command
+        if (args[0].equalsIgnoreCase("help")) {
+            sendMessage("Available commands:");
+            sendMessage(".bind <module> <key> - Binds a key to a module");
+            // Expand with more commands as needed
+            return;
+        }
+
+        // "bind" command
         if (args[0].equalsIgnoreCase("bind")) {
             if (args.length < 3) {
                 sendMessage("Usage: .bind <module> <key>");
