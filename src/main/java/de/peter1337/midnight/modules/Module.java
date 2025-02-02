@@ -1,10 +1,11 @@
 package de.peter1337.midnight.modules;
 
+import de.peter1337.midnight.manager.BindManager;
 import de.peter1337.midnight.utils.Category;
 import de.peter1337.midnight.utils.Setting;
-import de.peter1337.midnight.manager.BindManager;
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.client.util.math.MatrixStack;
 
 public class Module {
     private final String name;
@@ -19,8 +20,6 @@ public class Module {
         this.description = description;
         this.category = category;
         this.bind = bind;
-
-        // Register initial bind if provided
         if (bind != null && !bind.isEmpty()) {
             BindManager.registerBind(this, bind);
         }
@@ -33,20 +32,51 @@ public class Module {
 
     public void toggle() {
         enabled = !enabled;
-        if (enabled) onEnable();
-        else onDisable();
+        System.out.println(name + " toggled to " + enabled);
+        if (enabled) {
+            onEnable();
+        } else {
+            onDisable();
+        }
     }
 
-    public void onEnable() {}
-    public void onDisable() {}
-    public void onUpdate() {}
+    // Called during the render phase.
+    public void onRender(MatrixStack matrices) { }
 
-    public String getName() { return name; }
-    public String getDescription() { return description; }
-    public Category getCategory() { return category; }
-    public boolean isEnabled() { return enabled; }
-    public String getBind() { return bind; }
+    // Called when the module is enabled.
+    public void onEnable() { }
+
+    // Called when the module is disabled.
+    public void onDisable() { }
+
+    // Called on every tick.
+    public void onUpdate() { }
+
+    public String getName() {
+        return this.name;
+    }
+
+    public String getDescription() {
+        return this.description;
+    }
+
+    public Category getCategory() {
+        return this.category;
+    }
+
+    public boolean isEnabled() {
+        return this.enabled;
+    }
+
+    public String getBind() {
+        return this.bind;
+    }
+
     public void setBind(String bind) {
-        BindManager.updateBind(this, bind);
+        this.bind = bind;
+    }
+
+    public List<Setting<?>> getSettings() {
+        return this.settings;
     }
 }

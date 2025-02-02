@@ -6,7 +6,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
-import de.peter1337.midnight.manager.CommandManager;
+import de.peter1337.midnight.manager.command.CommandManager;
 
 @Mixin(ClientPlayNetworkHandler.class)
 public class ChatMixin {
