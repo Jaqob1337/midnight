@@ -8,7 +8,7 @@ import java.io.InputStream;
 public class CustomFontLoader {
 
     /**
-     * Loads a TrueType font from the mod's resource folder.
+     * Loads a TrueType font from the mod’s resource folder.
      *
      * @param path the path to the font file (e.g., "/assets/midnight/fonts/Liter.ttf")
      * @param size the desired font size

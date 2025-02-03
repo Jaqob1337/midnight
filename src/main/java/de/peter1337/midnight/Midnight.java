@@ -5,13 +5,15 @@ import de.peter1337.midnight.manager.ModuleManager;
 import de.peter1337.midnight.manager.command.CommandManager;
 import de.peter1337.midnight.manager.command.CommandAutoComplete;
 import de.peter1337.midnight.manager.command.CommandSuggestionRenderer;
-import de.peter1337.midnight.render.gui.ModuleArrayList;
 import de.peter1337.midnight.render.CustomFontRenderer;
+import de.peter1337.midnight.render.gui.ModuleArrayList;
+import me.x150.renderer.render.MSAAFramebuffer;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.loader.api.FabricLoader;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.render.RenderTickCounter;
 import org.slf4j.Logger;
@@ -23,7 +25,7 @@ public class Midnight implements ModInitializer {
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 	public static final String VERSION = "0.0.1";
 
-	// Create a static instance of our module array list overlay.
+	// Instance of the module array list overlay.
 	private static final ModuleArrayList moduleArrayList = new ModuleArrayList();
 
 	@Override
@@ -31,10 +33,20 @@ public class Midnight implements ModInitializer {
 		LOGGER.info("Initializing {} mod...", CLIENT_NAME);
 		ModuleManager.init();
 		CommandManager.init();
-		// Initialize custom font renderer.
-		CustomFontRenderer.init();
 
+		// Do NOT initialize the font renderer immediately.
+		// Instead, delay initialization until the client window is available.
+
+		// Register a client tick event to check if the window is ready.
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
+			if (client.getWindow() != null && CustomFontRenderer.getInstance() == null) {
+				try {
+					CustomFontRenderer.init();
+					LOGGER.info("CustomFontRenderer initialized successfully.");
+				} catch (Exception e) {
+					LOGGER.error("Failed to initialize CustomFontRenderer", e);
+				}
+			}
 			ModuleManager.onUpdate();
 			KeyEvent.tick();
 			CommandAutoComplete.tick();
@@ -43,12 +55,26 @@ public class Midnight implements ModInitializer {
 			}
 		});
 
+		// Register HUD render callback (client-side only).
 		if (FabricLoader.getInstance().getEnvironmentType() == EnvType.CLIENT) {
 			HudRenderCallback.EVENT.register((DrawContext context, RenderTickCounter tickCounter) -> {
-				// Render the modules arraylist overlay.
+				// Render the modules overlay.
 				moduleArrayList.render(context.getMatrices());
-				// Render command suggestions if applicable.
 				CommandSuggestionRenderer.render(context);
+
+				// Only attempt to render text if the font renderer is initialized.
+				if (CustomFontRenderer.getInstance() != null) {
+					MSAAFramebuffer.use(8, () -> {
+						CustomFontRenderer.getInstance().drawString(
+								context.getMatrices(),
+								"Hello, Midnight!",
+								10, 10,
+								0xFFFFFFFF // White color in ARGB.
+						);
+					});
+				} else {
+					LOGGER.warn("CustomFontRenderer instance is still null during HUD rendering.");
+				}
 			});
 		}
 		LOGGER.info("{} mod initialized!", CLIENT_NAME);

@@ -14,15 +14,25 @@ public class ModuleArrayList {
     private final MinecraftClient mc = MinecraftClient.getInstance();
 
     public void render(MatrixStack matrices) {
+        // Check if the window is initialized
+        if (mc.getWindow() == null) {
+            return;
+        }
+
+        int screenWidth = mc.getWindow().getScaledWidth();
+
         List<Module> enabledModules = ModuleManager.getModules().stream()
                 .filter(Module::isEnabled)
                 .collect(Collectors.toList());
 
-        // Sort modules alphabetically; adjust as desired.
+        // Sort modules alphabetically (adjust as desired)
         enabledModules.sort((m1, m2) -> m1.getName().compareToIgnoreCase(m2.getName()));
 
         CustomFontRenderer fontRenderer = CustomFontRenderer.getInstance();
-        int screenWidth = mc.getWindow().getScaledWidth();
+        // Ensure the font renderer is initialized.
+        if (fontRenderer == null) {
+            return;
+        }
 
         int y = 5;
         for (Module module : enabledModules) {
