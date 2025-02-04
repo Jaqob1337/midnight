@@ -38,8 +38,10 @@ public class ModuleManager {
     }
 
     public static void onUpdate() {
-        modules.stream()
-                .filter(Module::isEnabled)
-                .forEach(Module::onUpdate);
+        modules.forEach(module -> {
+            if (module.isEnabled() || module.shouldAlwaysUpdate()) {
+                module.onUpdate();
+            }
+        });
     }
 }

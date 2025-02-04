@@ -1,9 +1,8 @@
 package de.peter1337.midnight.render.gui;
 
-import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.manager.ModuleManager;
+import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.render.CustomFontRenderer;
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.util.math.MatrixStack;
 
 import java.util.List;
@@ -11,36 +10,40 @@ import java.util.stream.Collectors;
 
 public class ModuleArrayList {
 
-    private final MinecraftClient mc = MinecraftClient.getInstance();
+    // Define the right boundary for the module list.
+    private static final int FIXED_RIGHT_MARGIN = 630;
 
     public void render(MatrixStack matrices) {
-        // Check if the window is initialized
-        if (mc.getWindow() == null) {
+        CustomFontRenderer fontRenderer = CustomFontRenderer.getInstance();
+        if (fontRenderer == null) {
             return;
         }
-
-        int screenWidth = mc.getWindow().getScaledWidth();
-
+        // Get all enabled modules.
         List<Module> enabledModules = ModuleManager.getModules().stream()
                 .filter(Module::isEnabled)
                 .collect(Collectors.toList());
 
-        // Sort modules alphabetically (adjust as desired)
-        enabledModules.sort((m1, m2) -> m1.getName().compareToIgnoreCase(m2.getName()));
+        int y = 3; // starting y-coordinate
 
-        CustomFontRenderer fontRenderer = CustomFontRenderer.getInstance();
-        // Ensure the font renderer is initialized.
-        if (fontRenderer == null) {
-            return;
-        }
-
-        int y = 5;
         for (Module module : enabledModules) {
             String name = module.getName();
             int textWidth = fontRenderer.getStringWidth(name);
-            int x = screenWidth - textWidth - 5;  // Right-align with 5 pixels padding.
-            fontRenderer.drawString(matrices, name, x, y, 0xFFFFFFFF);
-            y += fontRenderer.getFontHeight() + 2;
+
+            // Optional: If the text is wider than available space, clip it (with ellipsis) so it fits.
+            if (textWidth > FIXED_RIGHT_MARGIN - 3) { // leaving a small left margin (3px)
+                while (textWidth > FIXED_RIGHT_MARGIN - 3 && name.length() > 0) {
+                    name = name.substring(0, name.length() - 1);
+                    textWidth = fontRenderer.getStringWidth(name + "...");
+                }
+                name = name + "...";
+                textWidth = fontRenderer.getStringWidth(name);
+            }
+
+            // Calculate the starting x coordinate so that the text's right edge is at FIXED_RIGHT_MARGIN.
+            int x = FIXED_RIGHT_MARGIN - textWidth;
+
+            fontRenderer.drawStringWithShadow(matrices, name, x, y, 0xFFFFFFFF, 0x55000000);
+            y += fontRenderer.getFontHeight() + 2; // move down for the next module
         }
     }
 }

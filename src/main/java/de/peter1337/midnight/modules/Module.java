@@ -52,6 +52,11 @@ public class Module {
     // Called on every tick.
     public void onUpdate() { }
 
+    // New method: should this module update even if disabled?
+    public boolean shouldAlwaysUpdate() {
+        return false;
+    }
+
     public String getName() {
         return this.name;
     }

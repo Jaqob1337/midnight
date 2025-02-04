@@ -26,7 +26,7 @@ public class CustomFontRenderer {
         try {
             // Use CustomFontLoader to load your font from resources.
             // The resource path must start with a slash.
-            Font literFont = CustomFontLoader.loadFont("/assets/midnight/fonts/Liter.ttf", 18f);
+            Font literFont = CustomFontLoader.loadFont("/assets/midnight/fonts/Liter.ttf", 8f);
             // Create the Renderer library's FontRenderer with your loaded font and a scale factor.
             FontRenderer fr = new FontRenderer(literFont, 9f);
             instance = new CustomFontRenderer(fr, literFont);
@@ -35,7 +35,7 @@ public class CustomFontRenderer {
             e.printStackTrace();
             System.err.println("CustomFontRenderer initialization failed! Falling back to Arial.");
             // Fallback using Arial:
-            Font fallback = new Font("Arial", Font.PLAIN, 18);
+            Font fallback = new Font("Arial", Font.PLAIN, 8);
             FontRenderer fr = new FontRenderer(fallback, 9f);
             instance = new CustomFontRenderer(fr, fallback);
         }
@@ -75,5 +75,23 @@ public class CustomFontRenderer {
         float g = ((color >> 8) & 0xFF) / 255f;
         float b = (color & 0xFF) / 255f;
         renderer.drawString(matrices, text, x, y, r, g, b, a);
+    }
+
+    /**
+     * Draws text with a drop shadow. The shadow is drawn with a default offset of (0,1)
+     * and a slightly more transparent color.
+     *
+     * @param matrices    the current matrix stack
+     * @param text        the text to draw
+     * @param x           the x-coordinate on screen
+     * @param y           the y-coordinate on screen
+     * @param mainColor   the main text color in ARGB (e.g., 0xFFFFFFFF for white)
+     * @param shadowColor the drop shadow color in ARGB (e.g., 0x55000000 for a subtle shadow)
+     */
+    public void drawStringWithShadow(MatrixStack matrices, String text, int x, int y, int mainColor, int shadowColor) {
+        // Draw shadow with a vertical offset of 1 pixel.
+        drawString(matrices, text, x, y + 1, shadowColor);
+        // Draw main text at original coordinates.
+        drawString(matrices, text, x, y, mainColor);
     }
 }

@@ -5,7 +5,8 @@
 	"mixins": [
 		"ChatMixin",
 		"EntityGlowingMixin",
-		"ChatScreenAccessor"
+		"ChatScreenAccessor",
+		"TitleScreenMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
