@@ -20,14 +20,14 @@ public class Midnight implements ModInitializer {
 	public void onInitialize() {
 		LOGGER.info("Initializing {} mod...", CLIENT_NAME);
 
-		// Initialize core managers.
+		// Manager
 		ModuleManager.init();
 		CommandManager.init();
 
-		// Delegate tick and update logic.
+		//Handler
 		TickHandler.init();
 
-		// Register HUD rendering (only on client-side).
+		//HUD
 		if (FabricLoader.getInstance().getEnvironmentType() == EnvType.CLIENT) {
 			HudRenderer.init();
 		}

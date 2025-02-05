@@ -1,4 +1,4 @@
-package de.peter1337.midnight.render;
+package de.peter1337.midnight.render.font;
 
 import me.x150.renderer.font.FontRenderer;
 import net.minecraft.client.util.math.MatrixStack;

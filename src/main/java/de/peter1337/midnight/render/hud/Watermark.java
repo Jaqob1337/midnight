@@ -1,7 +1,7 @@
-package de.peter1337.midnight.render.gui;
+package de.peter1337.midnight.render.hud;
 
 import net.minecraft.client.util.math.MatrixStack;
-import de.peter1337.midnight.render.CustomFontRenderer;
+import de.peter1337.midnight.render.font.CustomFontRenderer;
 
 import static de.peter1337.midnight.Midnight.CLIENT_NAME;
 

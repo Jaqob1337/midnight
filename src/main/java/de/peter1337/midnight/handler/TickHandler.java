@@ -3,9 +3,9 @@ package de.peter1337.midnight.handler;
 import de.peter1337.midnight.events.KeyEvent;
 import de.peter1337.midnight.manager.ModuleManager;
 import de.peter1337.midnight.manager.command.CommandAutoComplete;
-import de.peter1337.midnight.render.CustomFontRenderer;
+import de.peter1337.midnight.modules.render.ESP;
+import de.peter1337.midnight.render.font.CustomFontRenderer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.minecraft.client.MinecraftClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import de.peter1337.midnight.Midnight;
@@ -26,14 +26,12 @@ public class TickHandler {
             }
 
             // Update all modules.
-            // This includes the ESP module, whose onUpdate method clears glowing effects
-            // if the module is disabled. By using the END_CLIENT_TICK event, this update
-            // is executed after most other tick-based logic.
             ModuleManager.onUpdate();
 
             // Process key events.
             KeyEvent.tick();
 
+            // Call ESP.tick() every tick to update glowing effects.
             // Update command auto-completion.
             CommandAutoComplete.tick();
 

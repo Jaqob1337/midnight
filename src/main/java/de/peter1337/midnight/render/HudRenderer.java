@@ -1,8 +1,8 @@
 package de.peter1337.midnight.render;
 
 import de.peter1337.midnight.manager.command.CommandSuggestionRenderer;
-import de.peter1337.midnight.render.gui.ModuleArrayList;
-import de.peter1337.midnight.render.gui.Watermark;
+import de.peter1337.midnight.render.hud.ModuleArrayList;
+import de.peter1337.midnight.render.hud.Watermark;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.fabricmc.loader.api.FabricLoader;

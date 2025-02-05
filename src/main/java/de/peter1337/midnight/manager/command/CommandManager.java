@@ -83,6 +83,12 @@ public class CommandManager {
             }
             module.toggle();
             sendMessage(module.getName() + " is now " + (module.isEnabled() ? "enabled" : "disabled"));
+        } else if (args[0].equalsIgnoreCase("help")) {
+            // Display all available commands.
+            sendMessage("Available commands:");
+            sendMessage(" - .bind <module> <key> : Bind a key to a module");
+            sendMessage(" - .list              : List all modules");
+            sendMessage(" - .toggle <module>   : Toggle a module on/off");
         }
     }
 

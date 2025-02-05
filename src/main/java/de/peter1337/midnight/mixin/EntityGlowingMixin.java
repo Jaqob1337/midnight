@@ -10,15 +10,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 @Mixin(Entity.class)
 public abstract class EntityGlowingMixin {
     /**
-     * Override isGlowing() so that if the ESP module is enabled,
-     * the entity always appears glowing.
+     * Override isGlowing() so that the entity glows if and only if the ESP module is enabled.
      */
     @Inject(method = "isGlowing", at = @At("HEAD"), cancellable = true)
     private void overrideIsGlowing(CallbackInfoReturnable<Boolean> cir) {
-        // Retrieve the module instance from ModuleManager
         var espModule = ModuleManager.getModule("ESP");
-        if (espModule != null && espModule.isEnabled()) {
-            cir.setReturnValue(true);
+        if (espModule != null) {
+            // Force the glowing state to follow the module's state.
+            cir.setReturnValue(espModule.isEnabled());
         }
     }
 }

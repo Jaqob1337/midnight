@@ -1,4 +1,4 @@
-package de.peter1337.midnight.render;
+package de.peter1337.midnight.render.font;
 
 import java.awt.Font;
 import java.awt.FontFormatException;
