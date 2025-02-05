@@ -19,7 +19,7 @@ public class ESP extends Module {
         active = true;
         // Direkt beim Aktivieren alle Entities außer dem Spieler glühen lassen
         updateGlow(true);
-        Midnight.LOGGER.info("ESP eingeschaltet");
+        Midnight.LOGGER.info("ESP on");
     }
 
     @Override
@@ -27,7 +27,7 @@ public class ESP extends Module {
         active = false;
         // Direkt beim Deaktivieren wird der Glow von allen Entities entfernt
         updateGlow(false);
-        Midnight.LOGGER.info("ESP ausgeschaltet");
+        Midnight.LOGGER.info("ESP off");
     }
 
     @Override
