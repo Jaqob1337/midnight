@@ -32,6 +32,9 @@ public class Midnight implements ModInitializer {
 			HudRenderer.init();
 		}
 
+
 		LOGGER.info("{} mod initialized!", CLIENT_NAME);
 	}
+
+
 }

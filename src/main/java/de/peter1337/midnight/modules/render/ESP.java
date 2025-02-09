@@ -2,7 +2,7 @@ package de.peter1337.midnight.modules.render;
 
 import de.peter1337.midnight.Midnight;
 import de.peter1337.midnight.modules.Module;
-import de.peter1337.midnight.utils.Category;
+import de.peter1337.midnight.modules.Category;
 import net.minecraft.client.MinecraftClient;
 
 public class ESP extends Module {
