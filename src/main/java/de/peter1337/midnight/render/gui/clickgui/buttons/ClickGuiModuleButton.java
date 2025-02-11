@@ -23,7 +23,7 @@ public class ClickGuiModuleButton {
     private static final float BUTTON_WIDTH = 100f;
     private static final float BUTTON_HEIGHT = 20f;
     private static final float BUTTON_RADIUS = 3f;
-    private static final Color BUTTON_COLOR = new Color(35, 35, 55, 255);
+    private static final Color BUTTON_COLOR = new Color(40, 35, 55, 255);
     private static final Color BUTTON_ENABLED_COLOR = new Color(45, 45, 65, 255);
     private static final Color TRANSPARENT = new Color(0, 0, 0, 0);
     private static final float FONT_SIZE = 11f;
@@ -38,7 +38,7 @@ public class ClickGuiModuleButton {
         this.settingComponents = new ArrayList<>();
 
         float xPos = parent.getWidth() * 0.3f;
-        float yPos = 30f + (index * (BUTTON_HEIGHT + 5));
+        float yPos = 25f + (index * (BUTTON_HEIGHT + 5));
 
         button = render2D.createRoundedRect(
                 xPos, yPos, BUTTON_WIDTH, BUTTON_HEIGHT, BUTTON_RADIUS, TRANSPARENT
@@ -70,14 +70,21 @@ public class ClickGuiModuleButton {
     public void render(DrawContext context) {
         if (!visible) return;
 
-        // Render main button
+        // Center text within the button
         if (fontRenderer != null && button != null) {
-            int textX = (int)(button.getX() + 10);
-            int textY = (int)(button.getY() + (BUTTON_HEIGHT - fontRenderer.getFontHeight()) / 2);
+            String moduleName = module.getName();
+            float textWidth = fontRenderer.getStringWidth(moduleName);
+            float fontHeight = fontRenderer.getFontHeight();
+
+            // Calculate horizontal center
+            int textX = (int)(button.getX() + (BUTTON_WIDTH - textWidth) / 2);
+
+            // Calculate vertical center with slight upward adjustment
+            int textY = (int)(button.getY() + (BUTTON_HEIGHT - fontHeight) / 2f - 2.8f);
 
             fontRenderer.drawStringWithShadow(
                     context.getMatrices(),
-                    module.getName(),
+                    moduleName,
                     textX,
                     textY,
                     module.isEnabled() ? 0xFFFFFFFF : 0xAAAAAAFF,
@@ -97,10 +104,9 @@ public class ClickGuiModuleButton {
         if (button != null && button.getParent() != null) {
             Shape parent = button.getParent();
             float xPos = parent.getWidth() * 0.3f;
-            float yPos = 12f + (index * (getTotalHeight() + 5)) - scrollOffset;
+            float yPos = 25f + (index * (getTotalHeight() + 5)) - scrollOffset;
             button.attachTo(parent, xPos, yPos);
 
-            // Update settings positions if expanded
             if (expanded) {
                 float settingYOffset = BUTTON_HEIGHT + SETTINGS_PADDING;
                 for (SettingComponent setting : settingComponents) {
@@ -168,4 +174,3 @@ public class ClickGuiModuleButton {
         return module;
     }
 }
-
