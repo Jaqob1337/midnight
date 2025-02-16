@@ -1,6 +1,5 @@
-package de.peter1337.midnight.render.gui;
+package de.peter1337.midnight.render;
 
-import de.peter1337.midnight.render.Render2D;
 import de.peter1337.midnight.utils.GuiRenderUtils;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;

@@ -1,4 +1,4 @@
-package de.peter1337.midnight.render.gui.alt;
+package de.peter1337.midnight.render.screens.accountmanager;
 
 import de.peter1337.midnight.manager.alt.AltAccount;
 import de.peter1337.midnight.manager.alt.AltManager;
@@ -14,7 +14,7 @@ public class AltManagerScreen extends Screen {
     private ButtonWidget loginButton;
     private ButtonWidget backButton;
 
-    protected AltManagerScreen() {
+    public AltManagerScreen() {
         super(Text.literal("Alt Manager"));
     }
 

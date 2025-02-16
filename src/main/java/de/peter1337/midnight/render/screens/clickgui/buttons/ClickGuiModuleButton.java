@@ -1,11 +1,11 @@
-package de.peter1337.midnight.render.gui.clickgui.buttons;
+package de.peter1337.midnight.render.screens.clickgui.buttons;
 
 import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.render.Render2D;
-import de.peter1337.midnight.render.gui.clickgui.setting.SettingComponent;
-import de.peter1337.midnight.render.shape.Shape;
+import de.peter1337.midnight.render.Render2D.RenderShape;
+import de.peter1337.midnight.render.screens.clickgui.setting.SettingComponent;
 import de.peter1337.midnight.render.font.CustomFontRenderer;
-import de.peter1337.midnight.utils.Setting;
+import de.peter1337.midnight.modules.Setting;
 import net.minecraft.client.gui.DrawContext;
 import java.awt.Color;
 import java.util.ArrayList;
@@ -13,7 +13,7 @@ import java.util.List;
 
 public class ClickGuiModuleButton {
     private final Module module;
-    private final Shape button;
+    private final RenderShape button;
     private boolean visible;
     private boolean expanded;
     private final CustomFontRenderer fontRenderer;
@@ -29,7 +29,7 @@ public class ClickGuiModuleButton {
     private static final float FONT_SIZE = 11f;
     private static final float SETTINGS_PADDING = 5f;
 
-    public ClickGuiModuleButton(Render2D render2D, Module module, Shape parent, int index) {
+    public ClickGuiModuleButton(Render2D render2D, Module module, RenderShape parent, int index) {
         this.module = module;
         this.visible = false;
         this.expanded = false;
@@ -102,7 +102,7 @@ public class ClickGuiModuleButton {
 
     public void updatePosition(float scrollOffset) {
         if (button != null && button.getParent() != null) {
-            Shape parent = button.getParent();
+            RenderShape parent = button.getParent();
             float xPos = parent.getWidth() * 0.3f;
             float yPos = 25f + (index * (getTotalHeight() + 5)) - scrollOffset;
             button.attachTo(parent, xPos, yPos);
@@ -119,7 +119,7 @@ public class ClickGuiModuleButton {
 
     public void resetPosition() {
         if (button != null && button.getParent() != null) {
-            Shape parent = button.getParent();
+            RenderShape parent = button.getParent();
             float xPos = parent.getWidth() * 0.3f;
             float yPos = 30f + (index * (BUTTON_HEIGHT + 5));
             button.attachTo(parent, xPos, yPos);

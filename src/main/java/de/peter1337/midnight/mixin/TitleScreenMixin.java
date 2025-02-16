@@ -1,6 +1,6 @@
 package de.peter1337.midnight.mixin;
 
-import de.peter1337.midnight.render.gui.alt.AltManagerButton;
+import de.peter1337.midnight.render.screens.accountmanager.buttons.AltManagerButton;
 import net.minecraft.client.gui.screen.TitleScreen;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.text.Text;

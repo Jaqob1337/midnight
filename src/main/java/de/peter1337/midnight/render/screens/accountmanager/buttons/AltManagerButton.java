@@ -1,6 +1,6 @@
-package de.peter1337.midnight.render.gui.alt;
+package de.peter1337.midnight.render.screens.accountmanager.buttons;
 
-import de.peter1337.midnight.render.gui.alt.AltManagerScreen;
+import de.peter1337.midnight.render.screens.accountmanager.AltManagerScreen;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.text.Text;

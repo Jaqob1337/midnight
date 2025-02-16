@@ -2,7 +2,7 @@ package de.peter1337.midnight.modules.movement;
 
 import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.modules.Category;
-import de.peter1337.midnight.utils.Setting;
+import de.peter1337.midnight.modules.Setting;
 import net.minecraft.client.MinecraftClient;
 
 public class Sprint extends Module {

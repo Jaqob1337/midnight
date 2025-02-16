@@ -1,17 +1,17 @@
-package de.peter1337.midnight.render.gui.clickgui.setting;
+package de.peter1337.midnight.render.screens.clickgui.setting;
 
 import de.peter1337.midnight.render.Render2D;
-import de.peter1337.midnight.render.shape.Shape;
+import de.peter1337.midnight.render.Render2D.RenderShape;
 import de.peter1337.midnight.render.font.CustomFontRenderer;
-import de.peter1337.midnight.utils.Setting;
+import de.peter1337.midnight.modules.Setting;
 import net.minecraft.client.gui.DrawContext;
 import java.awt.Color;
 
 public class SettingComponent {
     private final Setting<?> setting;
-    private final Shape background;
-    private final Shape toggleTrack;
-    private final Shape toggleKnob;
+    private final RenderShape background;
+    private final RenderShape toggleTrack;
+    private final RenderShape toggleKnob;
     private final CustomFontRenderer fontRenderer;
     private boolean visible;
 
@@ -34,7 +34,7 @@ public class SettingComponent {
     private static final Color KNOB_COLOR = new Color(255, 255, 255, 255);
     private static final Color TRANSPARENT = new Color(0, 0, 0, 0);
 
-    public SettingComponent(Render2D render2D, Setting<?> setting, Shape parent, float yOffset) {
+    public SettingComponent(Render2D render2D, Setting<?> setting, RenderShape parent, float yOffset) {
         this.setting = setting;
         this.fontRenderer = CustomFontRenderer.getInstanceForSize(10f);
         this.visible = false;

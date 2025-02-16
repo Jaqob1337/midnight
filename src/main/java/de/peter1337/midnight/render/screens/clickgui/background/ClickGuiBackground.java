@@ -1,13 +1,13 @@
-package de.peter1337.midnight.render.gui.clickgui.background;
+package de.peter1337.midnight.render.screens.clickgui.background;
 
 import de.peter1337.midnight.render.Render2D;
-import de.peter1337.midnight.render.shape.Shape;
+import de.peter1337.midnight.render.Render2D.RenderShape;
 import java.awt.Color;
 
 public class ClickGuiBackground {
-    private final Shape background;
-    private final Shape moduleSection;
-    private final Shape overlay;
+    private final RenderShape background;
+    private final RenderShape moduleSection;
+    private final RenderShape overlay;
 
     private static final float PANEL_WIDTH = 380f;
     private static final float PANEL_HEIGHT = 200f;
@@ -53,15 +53,15 @@ public class ClickGuiBackground {
         moduleSection.attachTo(background, PANEL_WIDTH * 0.3f + MODULE_SECTION_MARGIN, MODULE_SECTION_TOP_MARGIN);
     }
 
-    public Shape getBackground() {
+    public RenderShape getBackground() {
         return background;
     }
 
-    public Shape getModuleSection() {
+    public RenderShape getModuleSection() {
         return moduleSection;
     }
 
-    public Shape getOverlay() {
+    public RenderShape getOverlay() {
         return overlay;
     }
 }

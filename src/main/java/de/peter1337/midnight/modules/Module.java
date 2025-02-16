@@ -1,7 +1,7 @@
 package de.peter1337.midnight.modules;
 
 import de.peter1337.midnight.manager.BindManager;
-import de.peter1337.midnight.utils.Setting;
+
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.util.math.MatrixStack;

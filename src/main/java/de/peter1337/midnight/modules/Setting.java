@@ -1,4 +1,4 @@
-package de.peter1337.midnight.utils;
+package de.peter1337.midnight.modules;
 
 import java.util.ArrayList;
 import java.util.List;

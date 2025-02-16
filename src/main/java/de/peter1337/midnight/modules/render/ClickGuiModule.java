@@ -1,7 +1,7 @@
 package de.peter1337.midnight.modules.render;
 
 import net.minecraft.client.MinecraftClient;
-import de.peter1337.midnight.render.gui.clickgui.ClickGuiScreen;
+import de.peter1337.midnight.render.screens.clickgui.ClickGuiScreen;
 import de.peter1337.midnight.modules.Category;
 import de.peter1337.   midnight.modules.Module;
 

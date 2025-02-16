@@ -1,4 +1,4 @@
-package de.peter1337.midnight.manager.shader;
+package de.peter1337.midnight.manager;
 
 import de.peter1337.midnight.render.shader.ShaderSources;
 import de.peter1337.midnight.Midnight;

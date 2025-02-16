@@ -1,16 +1,20 @@
-// File: Render2D.java
 package de.peter1337.midnight.render;
 
-import de.peter1337.midnight.manager.shader.ShaderManager;
-import de.peter1337.midnight.render.shape.Shape;
+import de.peter1337.midnight.manager.ShaderManager;
 import java.awt.Color;
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.render.RenderLayer;
+import com.mojang.blaze3d.systems.RenderSystem;
+import net.minecraft.util.Identifier;
 
 public class Render2D {
+    private static final MinecraftClient client = MinecraftClient.getInstance();
     private final ShaderManager shaderManager;
-    private final List<Shape> shapes;
-    private Shape clipBounds;
+    private final List<RenderShape> shapes;
+    private RenderShape clipBounds;
 
     public Render2D() {
         this.shaderManager = new ShaderManager();
@@ -26,12 +30,12 @@ public class Render2D {
         shaderManager.cleanup();
     }
 
-    public void setClipBounds(Shape clipBounds) {
+    public void setClipBounds(RenderShape clipBounds) {
         this.clipBounds = clipBounds;
     }
 
-    public Shape createRoundedRect(float x, float y, float width, float height, float radius, Color color) {
-        Shape shape = new Shape.Builder(x, y, width, height)
+    public RenderShape createRoundedRect(float x, float y, float width, float height, float radius, Color color) {
+        RenderShape shape = new RenderShape.Builder(x, y, width, height)
                 .radius(radius)
                 .fillColor(color)
                 .build();
@@ -39,9 +43,9 @@ public class Render2D {
         return shape;
     }
 
-    public Shape createRoundedRectWithOutline(float x, float y, float width, float height, float radius,
-                                              Color fillColor, Color outlineColor, float outlineWidth) {
-        Shape shape = new Shape.Builder(x, y, width, height)
+    public RenderShape createRoundedRectWithOutline(float x, float y, float width, float height, float radius,
+                                                    Color fillColor, Color outlineColor, float outlineWidth) {
+        RenderShape shape = new RenderShape.Builder(x, y, width, height)
                 .radius(radius)
                 .fillColor(fillColor)
                 .outline(outlineColor, outlineWidth)
@@ -50,8 +54,8 @@ public class Render2D {
         return shape;
     }
 
-    public Shape createCircle(float x, float y, float radius, Color color) {
-        Shape shape = new Shape.Builder(x - radius, y - radius, radius * 2, radius * 2)
+    public RenderShape createCircle(float x, float y, float radius, Color color) {
+        RenderShape shape = new RenderShape.Builder(x - radius, y - radius, radius * 2, radius * 2)
                 .radius(radius)
                 .fillColor(color)
                 .build();
@@ -70,7 +74,7 @@ public class Render2D {
             );
         }
 
-        for (Shape shape : shapes) {
+        for (RenderShape shape : shapes) {
             shaderManager.drawShape(
                     shape.getX(),
                     shape.getY(),
@@ -91,7 +95,7 @@ public class Render2D {
 
     public boolean handleMouseClicked(double mouseX, double mouseY, int button) {
         for (int i = shapes.size() - 1; i >= 0; i--) {
-            Shape shape = shapes.get(i);
+            RenderShape shape = shapes.get(i);
             if (shape.handleMouseClicked(mouseX, mouseY, button)) {
                 return true;
             }
@@ -100,7 +104,7 @@ public class Render2D {
     }
 
     public boolean handleMouseDragged(double mouseX, double mouseY) {
-        for (Shape shape : shapes) {
+        for (RenderShape shape : shapes) {
             if (shape.handleMouseDragged(mouseX, mouseY)) {
                 return true;
             }
@@ -109,8 +113,230 @@ public class Render2D {
     }
 
     public void handleMouseReleased() {
-        for (Shape shape : shapes) {
+        for (RenderShape shape : shapes) {
             shape.handleMouseReleased();
+        }
+    }
+
+    /**
+     * Returns the absolute position (in screen coordinates) of the given RenderShape.
+     * This method returns a float array [x, y].
+     */
+    private static float[] getAbsolutePosition(RenderShape shape) {
+        float absX = shape.getX();
+        float absY = shape.getY();
+        RenderShape parent = shape.getParent();
+        while (parent != null) {
+            absX += parent.getX();
+            absY += parent.getY();
+            parent = parent.getParent();
+        }
+        return new float[]{absX, absY};
+    }
+
+    // Updated scissor methods using float parameters.
+    public static void beginScissor(float x, float y, float endX, float endY) {
+        float width = Math.max(0f, endX - x);
+        float height = Math.max(0f, endY - y);
+        float scale = (float) client.getWindow().getScaleFactor();
+        int sy = (int)((client.getWindow().getScaledHeight() - (y + height)) * scale);
+        RenderSystem.enableScissor((int)(x * scale), sy, (int)(width * scale), (int)(height * scale));
+    }
+
+    public static void endScissor() {
+        RenderSystem.disableScissor();
+    }
+
+    /**
+     * Renders a texture with clipping applied based on the current clipBounds.
+     * Converts clipBounds to absolute screen coordinates.
+     *
+     * @param context the DrawContext
+     * @param texture the texture Identifier
+     * @param x the x position to draw
+     * @param y the y position to draw
+     * @param width the drawn width
+     * @param height the drawn height
+     */
+
+
+    // Nested RenderShape class remains unchanged.
+    public static class RenderShape {
+        private float x;
+        private float y;
+        private final float width;
+        private final float height;
+        private final float radius;
+        private final float smoothing;
+        private Color fillColor;
+        private final Color outlineColor;
+        private final float outlineWidth;
+        private boolean isDraggable;
+        private boolean isDragging;
+        private float dragOffsetX;
+        private float dragOffsetY;
+
+        private RenderShape parent;
+        private final List<RenderShape> children;
+        private float relativeX;
+        private float relativeY;
+
+        private RenderShape(Builder builder) {
+            this.x = builder.x;
+            this.y = builder.y;
+            this.width = builder.width;
+            this.height = builder.height;
+            this.radius = builder.radius;
+            this.smoothing = builder.smoothing;
+            this.fillColor = builder.fillColor;
+            this.outlineColor = builder.outlineColor;
+            this.outlineWidth = builder.outlineWidth;
+            this.isDraggable = builder.isDraggable;
+            this.children = new ArrayList<>();
+        }
+
+        public void attachTo(RenderShape parent, float relativeX, float relativeY) {
+            if (this.parent != null) {
+                detachFromParent();
+            }
+            this.parent = parent;
+            this.relativeX = relativeX;
+            this.relativeY = relativeY;
+            parent.children.add(this);
+            updatePosition();
+        }
+
+        public void detachFromParent() {
+            if (parent != null) {
+                parent.children.remove(this);
+                parent = null;
+            }
+        }
+
+        private void updatePosition() {
+            if (parent != null) {
+                this.x = parent.getX() + relativeX;
+                this.y = parent.getY() + relativeY;
+                updateChildren(0, 0);
+            }
+        }
+
+        private void updateChildren(float deltaX, float deltaY) {
+            for (RenderShape child : children) {
+                child.x += deltaX;
+                child.y += deltaY;
+                child.updateChildren(deltaX, deltaY);
+            }
+        }
+
+        public boolean isHovered(double mouseX, double mouseY) {
+            return mouseX >= x && mouseX <= x + width &&
+                    mouseY >= y && mouseY <= y + height;
+        }
+
+        public boolean handleMouseClicked(double mouseX, double mouseY, int button) {
+            if (isDraggable && isHovered(mouseX, mouseY)) {
+                isDragging = true;
+                dragOffsetX = (float) mouseX - x;
+                dragOffsetY = (float) mouseY - y;
+                return true;
+            }
+            return false;
+        }
+
+        public boolean handleMouseDragged(double mouseX, double mouseY) {
+            if (isDragging) {
+                float newX = (float) mouseX - dragOffsetX;
+                float newY = (float) mouseY - dragOffsetY;
+                float deltaX = newX - x;
+                float deltaY = newY - y;
+                x = newX;
+                y = newY;
+                updateChildren(deltaX, deltaY);
+                return true;
+            }
+            return false;
+        }
+
+        public void handleMouseReleased() {
+            isDragging = false;
+        }
+
+        // Getters and Setters
+        public float getX() { return x; }
+        public float getY() { return y; }
+        public float getWidth() { return width; }
+        public float getHeight() { return height; }
+        public float getRadius() { return radius; }
+        public float getSmoothing() { return smoothing; }
+        public Color getFillColor() { return fillColor; }
+        public Color getOutlineColor() { return outlineColor; }
+        public float getOutlineWidth() { return outlineWidth; }
+        public boolean isDraggable() { return isDraggable; }
+        public void setDraggable(boolean draggable) { this.isDraggable = draggable; }
+        public List<RenderShape> getChildren() { return children; }
+        public RenderShape getParent() { return parent; }
+
+        public void setFillColor(Color color) {
+            this.fillColor = color;
+        }
+
+        public void setPosition(float x, float y) {
+            float deltaX = x - this.x;
+            float deltaY = y - this.y;
+            this.x = x;
+            this.y = y;
+            updateChildren(deltaX, deltaY);
+        }
+
+        public static class Builder {
+            private float x;
+            private float y;
+            private float width;
+            private float height;
+            private float radius = 0;
+            private float smoothing = 1.0f;
+            private Color fillColor = Color.WHITE;
+            private Color outlineColor = null;
+            private float outlineWidth = 0;
+            private boolean isDraggable = false;
+
+            public Builder(float x, float y, float width, float height) {
+                this.x = x;
+                this.y = y;
+                this.width = width;
+                this.height = height;
+            }
+
+            public Builder radius(float radius) {
+                this.radius = radius;
+                return this;
+            }
+
+            public Builder smoothing(float smoothing) {
+                this.smoothing = smoothing;
+                return this;
+            }
+
+            public Builder fillColor(Color fillColor) {
+                this.fillColor = fillColor;
+                return this;
+            }
+
+            public Builder outline(Color color, float width) {
+                this.outlineColor = color;
+                this.outlineWidth = width;
+                return this;
+            }
+
+            public Builder draggable(boolean draggable) {
+                this.isDraggable = draggable;
+                return this;
+            }
+
+            public RenderShape build() {
+                return new RenderShape(this);
+            }
         }
     }
 }

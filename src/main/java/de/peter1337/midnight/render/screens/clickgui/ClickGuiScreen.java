@@ -1,12 +1,12 @@
-package de.peter1337.midnight.render.gui.clickgui;
+package de.peter1337.midnight.render.screens.clickgui;
 
 import de.peter1337.midnight.manager.ModuleManager;
 import de.peter1337.midnight.modules.Category;
-import de.peter1337.midnight.render.gui.GuiScreen;
-import de.peter1337.midnight.render.gui.clickgui.background.ClickGuiBackground;
-import de.peter1337.midnight.render.gui.clickgui.buttons.ClickGuiCategoryButton;
-import de.peter1337.midnight.render.gui.clickgui.buttons.ClickGuiModuleButton;
-import de.peter1337.midnight.render.gui.clickgui.setting.SettingComponent;
+import de.peter1337.midnight.render.GuiScreen;
+import de.peter1337.midnight.render.screens.clickgui.background.ClickGuiBackground;
+import de.peter1337.midnight.render.screens.clickgui.buttons.ClickGuiCategoryButton;
+import de.peter1337.midnight.render.screens.clickgui.buttons.ClickGuiModuleButton;
+import de.peter1337.midnight.render.screens.clickgui.setting.SettingComponent;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.text.Text;
@@ -26,8 +26,11 @@ public class ClickGuiScreen extends GuiScreen {
     private static final float SCROLL_SPEED = 15f;
     private static final float SCROLL_ANIMATION_SPEED = 0.02f;
     private static final float CATEGORY_SPACING = 60f;
-    private static final float INITIAL_CATEGORY_OFFSET_Y = 10f;
+    private static final float INITIAL_CATEGORY_OFFSET_Y = 11f;
     private static final float MODULES_TOP_MARGIN = 20f;
+    private static final float CATEGORY_GAP = 10f;
+    private static final float ICON_SCALE = 0.9f;
+
 
     public ClickGuiScreen() {
         super(Text.literal("ClickGUI"));
@@ -67,8 +70,11 @@ public class ClickGuiScreen extends GuiScreen {
                     render2D,
                     category,
                     background.getBackground(),
-                    20f,
-                    currentOffsetY
+                    20f,              // offsetX
+                    currentOffsetY,   // buttonLine (y-coordinate)
+                    CATEGORY_GAP,     // gapBetweenButtons
+                    ICON_SCALE
+                    // scale factor (e.g., 0.5 for half size)
             );
             categoryButtons.add(categoryButton);
             currentOffsetY += CATEGORY_SPACING;
