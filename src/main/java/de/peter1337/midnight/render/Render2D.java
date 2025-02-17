@@ -5,10 +5,6 @@ import java.awt.Color;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.render.RenderLayer;
-import com.mojang.blaze3d.systems.RenderSystem;
-import net.minecraft.util.Identifier;
 
 public class Render2D {
     private static final MinecraftClient client = MinecraftClient.getInstance();
@@ -38,17 +34,6 @@ public class Render2D {
         RenderShape shape = new RenderShape.Builder(x, y, width, height)
                 .radius(radius)
                 .fillColor(color)
-                .build();
-        shapes.add(shape);
-        return shape;
-    }
-
-    public RenderShape createRoundedRectWithOutline(float x, float y, float width, float height, float radius,
-                                                    Color fillColor, Color outlineColor, float outlineWidth) {
-        RenderShape shape = new RenderShape.Builder(x, y, width, height)
-                .radius(radius)
-                .fillColor(fillColor)
-                .outline(outlineColor, outlineWidth)
                 .build();
         shapes.add(shape);
         return shape;
@@ -118,49 +103,6 @@ public class Render2D {
         }
     }
 
-    /**
-     * Returns the absolute position (in screen coordinates) of the given RenderShape.
-     * This method returns a float array [x, y].
-     */
-    private static float[] getAbsolutePosition(RenderShape shape) {
-        float absX = shape.getX();
-        float absY = shape.getY();
-        RenderShape parent = shape.getParent();
-        while (parent != null) {
-            absX += parent.getX();
-            absY += parent.getY();
-            parent = parent.getParent();
-        }
-        return new float[]{absX, absY};
-    }
-
-    // Updated scissor methods using float parameters.
-    public static void beginScissor(float x, float y, float endX, float endY) {
-        float width = Math.max(0f, endX - x);
-        float height = Math.max(0f, endY - y);
-        float scale = (float) client.getWindow().getScaleFactor();
-        int sy = (int)((client.getWindow().getScaledHeight() - (y + height)) * scale);
-        RenderSystem.enableScissor((int)(x * scale), sy, (int)(width * scale), (int)(height * scale));
-    }
-
-    public static void endScissor() {
-        RenderSystem.disableScissor();
-    }
-
-    /**
-     * Renders a texture with clipping applied based on the current clipBounds.
-     * Converts clipBounds to absolute screen coordinates.
-     *
-     * @param context the DrawContext
-     * @param texture the texture Identifier
-     * @param x the x position to draw
-     * @param y the y position to draw
-     * @param width the drawn width
-     * @param height the drawn height
-     */
-
-
-    // Nested RenderShape class remains unchanged.
     public static class RenderShape {
         private float x;
         private float y;
@@ -313,11 +255,6 @@ public class Render2D {
                 return this;
             }
 
-            public Builder smoothing(float smoothing) {
-                this.smoothing = smoothing;
-                return this;
-            }
-
             public Builder fillColor(Color fillColor) {
                 this.fillColor = fillColor;
                 return this;
@@ -329,10 +266,6 @@ public class Render2D {
                 return this;
             }
 
-            public Builder draggable(boolean draggable) {
-                this.isDraggable = draggable;
-                return this;
-            }
 
             public RenderShape build() {
                 return new RenderShape(this);
