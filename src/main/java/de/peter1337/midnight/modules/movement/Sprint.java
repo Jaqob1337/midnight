@@ -16,6 +16,14 @@ public class Sprint extends Module {
             new Setting<>("JumpSprint", Boolean.FALSE, "Automatically jump while sprinting")
     );
 
+    // Slider setting for jump delay in seconds.
+    private final Setting<Float> jumpDelay = register(
+            new Setting<>("JumpDelay", 0.5f, 0.1f, 2.0f, "Delay (in seconds) between jumps")
+    );
+
+    // Timestamp to track the last jump
+    private long lastJumpTime = 0;
+
     public Sprint() {
         super("Sprint", "Automatically sprints whenever possible.", Category.MOVEMENT, "b");
     }
@@ -57,9 +65,14 @@ public class Sprint extends Module {
         // Apply sprint state
         mc.player.setSprinting(shouldSprint);
 
-        // Handle JumpSprint - Automatically jump when sprinting and on ground
+        // Handle JumpSprint - Automatically jump when sprinting, on ground, and after the jump delay.
         if (shouldSprint && jumpSprint.getValue() && mc.player.isOnGround()) {
-            mc.player.jump();
+            long currentTime = System.currentTimeMillis();
+            float delaySeconds = jumpDelay.getValue(); // jumpDelay is in seconds
+            if (currentTime - lastJumpTime >= delaySeconds * 1000) {
+                mc.player.jump();
+                lastJumpTime = currentTime;
+            }
         }
     }
 }
