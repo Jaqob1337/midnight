@@ -10,6 +10,7 @@ import de.peter1337.midnight.render.screens.clickgui.setting.SettingComponent;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.text.Text;
+
 import java.util.*;
 
 public class ClickGuiScreen extends GuiScreen {
@@ -30,7 +31,6 @@ public class ClickGuiScreen extends GuiScreen {
     private static final float MODULES_TOP_MARGIN = 20f;
     private static final float CATEGORY_GAP = 10f;
     private static final float ICON_SCALE = 0.9f;
-
 
     public ClickGuiScreen() {
         super(Text.literal("ClickGUI"));
@@ -71,41 +71,34 @@ public class ClickGuiScreen extends GuiScreen {
                     category,
                     background.getBackground(),
                     20f,              // offsetX
-                    currentOffsetY,   // buttonLine (y-coordinate)
-                    CATEGORY_GAP,     // gapBetweenButtons
+                    currentOffsetY,   // y-coordinate
+                    CATEGORY_GAP,     // gap between buttons
                     ICON_SCALE
-                    // scale factor (e.g., 0.5 for half size)
             );
             categoryButtons.add(categoryButton);
             currentOffsetY += CATEGORY_SPACING;
         }
     }
 
-
     private void initializeModules() {
         for (Category category : Category.values()) {
             List<ClickGuiModuleButton> modules = new ArrayList<>();
-            int moduleIndex = 0;
-
             for (var module : ModuleManager.getModules()) {
                 if (module.getCategory() == category) {
                     ClickGuiModuleButton moduleButton = new ClickGuiModuleButton(
                             render2D,
                             module,
-                            background.getBackground(),
-                            moduleIndex++
+                            background.getBackground()
                     );
                     modules.add(moduleButton);
                 }
             }
-
             moduleButtons.put(category, modules);
         }
     }
 
     @Override
     public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
-        // Draw our custom background here
         if (background != null && background.getOverlay() != null) {
             render2D.renderShapes();
         }
@@ -113,31 +106,36 @@ public class ClickGuiScreen extends GuiScreen {
 
     @Override
     public void setFocused(boolean focused) {
-        // Empty to prevent screen dimming
+        // Prevent screen dimming.
     }
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        // Update scroll animations
+        // Animate scrolls.
         currentCategoryScroll += (targetCategoryScroll - currentCategoryScroll) * SCROLL_ANIMATION_SPEED;
         currentModuleScroll += (targetModuleScroll - currentModuleScroll) * SCROLL_ANIMATION_SPEED;
 
-        // Update positions with animated scroll values
+        // Update category button positions.
         categoryButtons.forEach(button -> button.updatePosition(currentCategoryScroll));
+
+        // Update module buttons for the selected category.
         if (selectedCategory != null) {
-            moduleButtons.get(selectedCategory).forEach(button ->
-                    button.updatePosition(currentModuleScroll));
+            float cumulativeY = MODULES_TOP_MARGIN - currentModuleScroll;
+            for (ClickGuiModuleButton moduleButton : moduleButtons.get(selectedCategory)) {
+                moduleButton.updatePosition(cumulativeY);
+                cumulativeY += moduleButton.getTotalHeight() + 5f;  // 5f is spacing between module buttons.
+            }
         }
 
-        // Render all GUI elements
         super.render(context, mouseX, mouseY, delta);
 
-        // Render category and module buttons
+        // Render categories.
         categoryButtons.forEach(button -> {
             button.updateColor();
             button.render(context);
         });
 
+        // Render modules.
         moduleButtons.values().stream()
                 .flatMap(List::stream)
                 .forEach(moduleButton -> {
@@ -148,6 +146,7 @@ public class ClickGuiScreen extends GuiScreen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // First, check module buttons and their settings.
         if (selectedCategory != null) {
             List<ClickGuiModuleButton> currentModules = moduleButtons.get(selectedCategory);
             for (ClickGuiModuleButton moduleButton : currentModules) {
@@ -155,7 +154,7 @@ public class ClickGuiScreen extends GuiScreen {
                     moduleButton.onClick(button);
                     return true;
                 }
-                // Check for setting clicks if module is expanded
+                // Also check settings if the module is expanded.
                 for (SettingComponent setting : moduleButton.getSettingComponents()) {
                     if (setting.isHovered(mouseX, mouseY)) {
                         setting.onClick(mouseX, mouseY);
@@ -165,6 +164,7 @@ public class ClickGuiScreen extends GuiScreen {
             }
         }
 
+        // Then check category buttons.
         for (ClickGuiCategoryButton categoryButton : categoryButtons) {
             if (categoryButton.isHovered(mouseX, mouseY)) {
                 if (selectedCategory != categoryButton.getCategory()) {
@@ -172,23 +172,51 @@ public class ClickGuiScreen extends GuiScreen {
                         moduleButtons.get(selectedCategory).forEach(moduleButton ->
                                 moduleButton.setVisible(false));
                     }
-
                     selectedCategory = categoryButton.getCategory();
                     targetModuleScroll = 0f;
                     currentModuleScroll = 0f;
                     moduleButtons.get(selectedCategory).forEach(moduleButton -> {
                         moduleButton.setVisible(true);
-                        moduleButton.resetPosition();
                     });
-
                     categoryButtons.forEach(catButton ->
                             catButton.setSelected(catButton.getCategory() == selectedCategory));
                 }
                 return true;
             }
         }
-
         return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    @Override
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
+        if (selectedCategory != null) {
+            List<ClickGuiModuleButton> currentModules = moduleButtons.get(selectedCategory);
+            for (ClickGuiModuleButton moduleButton : currentModules) {
+                for (SettingComponent setting : moduleButton.getSettingComponents()) {
+                    if (setting.isHovered(mouseX, mouseY)) {
+                        setting.onMouseDrag(mouseX, mouseY);
+                        return true;
+                    }
+                }
+            }
+        }
+        return super.mouseDragged(mouseX, mouseY, button, deltaX, deltaY);
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (selectedCategory != null) {
+            List<ClickGuiModuleButton> currentModules = moduleButtons.get(selectedCategory);
+            for (ClickGuiModuleButton moduleButton : currentModules) {
+                for (SettingComponent setting : moduleButton.getSettingComponents()) {
+                    if (setting.isHovered(mouseX, mouseY)) {
+                        setting.onMouseUp(mouseX, mouseY);
+                        return true;
+                    }
+                }
+            }
+        }
+        return super.mouseReleased(mouseX, mouseY, button);
     }
 
     @Override
@@ -197,7 +225,6 @@ public class ClickGuiScreen extends GuiScreen {
             float totalCategoryHeight = categoryButtons.size() * CATEGORY_SPACING;
             float visibleHeight = background.getBackground().getHeight() - INITIAL_CATEGORY_OFFSET_Y;
             float maxScroll = Math.max(0, totalCategoryHeight - visibleHeight);
-
             targetCategoryScroll = Math.max(0, Math.min(targetCategoryScroll - (float)verticalAmount * SCROLL_SPEED, maxScroll));
             return true;
         } else if (selectedCategory != null && isMouseOverModules(mouseX, mouseY)) {
@@ -210,12 +237,10 @@ public class ClickGuiScreen extends GuiScreen {
 
     private float calculateMaxModuleScroll() {
         if (selectedCategory == null) return 0;
-
         float totalHeight = 0;
         for (ClickGuiModuleButton moduleButton : moduleButtons.get(selectedCategory)) {
-            totalHeight += moduleButton.getTotalHeight() + 5; // 5 is spacing between modules
+            totalHeight += moduleButton.getTotalHeight() + 5;
         }
-
         float visibleHeight = background.getBackground().getHeight() - MODULES_TOP_MARGIN;
         return Math.max(0, totalHeight - visibleHeight);
     }
@@ -224,7 +249,7 @@ public class ClickGuiScreen extends GuiScreen {
         if (background != null && background.getBackground() != null) {
             var bg = background.getBackground();
             return mouseX >= bg.getX() &&
-                    mouseX <= bg.getX() + 90 && // Category width
+                    mouseX <= bg.getX() + 90 &&
                     mouseY >= bg.getY() &&
                     mouseY <= bg.getY() + bg.getHeight();
         }
@@ -234,7 +259,7 @@ public class ClickGuiScreen extends GuiScreen {
     private boolean isMouseOverModules(double mouseX, double mouseY) {
         if (background != null && background.getBackground() != null) {
             var bg = background.getBackground();
-            return mouseX >= bg.getX() + 100 && // Module section start
+            return mouseX >= bg.getX() + 100 &&
                     mouseX <= bg.getX() + bg.getWidth() &&
                     mouseY >= bg.getY() &&
                     mouseY <= bg.getY() + bg.getHeight();

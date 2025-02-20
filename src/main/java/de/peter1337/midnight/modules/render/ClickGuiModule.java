@@ -1,27 +1,30 @@
 package de.peter1337.midnight.modules.render;
 
-import net.minecraft.client.MinecraftClient;
-import de.peter1337.midnight.render.screens.clickgui.ClickGuiScreen;
+import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.modules.Category;
-import de.peter1337.   midnight.modules.Module;
+import de.peter1337.midnight.modules.Setting;
+import de.peter1337.midnight.render.screens.clickgui.ClickGuiScreen;
+import net.minecraft.client.MinecraftClient;
 
-
-/**
- * A module that, when toggled, opens the ClickGUI.
- * It immediately disables itself so it is only used as a trigger.
- */
 public class ClickGuiModule extends Module {
 
+    // Setting that prevents resetting module button positions when enabled.
+    private final Setting<Boolean> disableResetPosition = register(
+            new Setting<>("DisableResetPosition", Boolean.FALSE, "Prevents module button positions from resetting when opening the ClickGUI")
+    );
+
     public ClickGuiModule() {
-        // Parameters: name, description, category (CLIENT for client-side), and bind ("NONE" here)
         super("ClickGUI", "Opens the client ClickGUI", Category.RENDER, "rshift");
+    }
+
+    public boolean isResetDisabled() {
+        return disableResetPosition.getValue();
     }
 
     @Override
     public void onEnable() {
-        // Open the ClickGUI screen.
         MinecraftClient.getInstance().setScreen(new ClickGuiScreen());
-        // Immediately toggle off to prevent the module from staying enabled.
+        // Immediately disable this module so it only acts as a trigger.
         toggle();
     }
 }
