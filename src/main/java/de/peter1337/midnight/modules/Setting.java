@@ -13,7 +13,7 @@ public class Setting<T> {
     private final List<T> options;
     private BiConsumer<T, T> onChange;
 
-    // Constructor for boolean settings
+    // Constructor for boolean settings.
     public Setting(String name, T defaultValue, String description) {
         this.name = name;
         this.value = defaultValue;
@@ -21,14 +21,14 @@ public class Setting<T> {
         this.options = new ArrayList<>();
     }
 
-    // Constructor for number settings with range
+    // Constructor for number settings with range.
     public Setting(String name, T defaultValue, T minValue, T maxValue, String description) {
         this(name, defaultValue, description);
         this.minValue = minValue;
         this.maxValue = maxValue;
     }
 
-    // Constructor for enum settings with options
+    // Constructor for enum/dropdown settings with options.
     public Setting(String name, T defaultValue, List<T> options, String description) {
         this(name, defaultValue, description);
         this.options.addAll(options);
@@ -44,7 +44,6 @@ public class Setting<T> {
 
     @SuppressWarnings("unchecked")
     public void setValue(Object newValue) {
-        // Handle type conversion for primitives
         T typedValue;
         try {
             if (value instanceof Boolean && newValue instanceof Boolean) {
@@ -54,12 +53,11 @@ public class Setting<T> {
             } else if (value.getClass().equals(newValue.getClass())) {
                 typedValue = (T) newValue;
             } else {
-                return; // Invalid type, ignore the change
+                return;
             }
         } catch (ClassCastException e) {
-            return; // Invalid type, ignore the change
+            return;
         }
-
         if (isValueValid(typedValue)) {
             T oldValue = this.value;
             this.value = typedValue;
@@ -81,21 +79,15 @@ public class Setting<T> {
 
     private boolean isValueValid(T newValue) {
         if (newValue == null) return false;
-
-        // For number settings, check range
         if (minValue != null && maxValue != null && newValue instanceof Number) {
             double val = ((Number) newValue).doubleValue();
             double min = ((Number) minValue).doubleValue();
             double max = ((Number) maxValue).doubleValue();
             return val >= min && val <= max;
         }
-
-        // For enum settings, check if option is valid
         if (!options.isEmpty()) {
             return options.contains(newValue);
         }
-
-        // For boolean settings, always true
         return true;
     }
 

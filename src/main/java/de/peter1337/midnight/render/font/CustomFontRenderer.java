@@ -35,7 +35,7 @@ public class CustomFontRenderer {
             return instances.get(size);
         }
         try {
-            Font literFont = CustomFontLoader.loadFont("/assets/midnight/fonts/OutfitRegular.ttf", 15f);
+            Font literFont = CustomFontLoader.loadFont("/assets/midnight/fonts/OutfitRegular.ttf", 600f);
             // Derive a new font at the desired size.
             Font newFont = literFont.deriveFont(size);
             FontRenderer fr = new FontRenderer(newFont, size);
@@ -46,7 +46,7 @@ public class CustomFontRenderer {
         } catch (Exception e) {
             e.printStackTrace();
             System.err.println("CustomFontRenderer creation failed! Falling back to Arial.");
-            Font fallback = new Font("Arial", Font.PLAIN, 15);
+            Font fallback = new Font("Arial", Font.PLAIN, 600);
             Font newFont = fallback.deriveFont(size);
             FontRenderer fr = new FontRenderer(newFont, size);
             CustomFontRenderer instance = new CustomFontRenderer(fr, newFont);

@@ -127,9 +127,8 @@ public class ClickGuiModuleButton {
         if (mouseButton == 0) {
             module.toggle();
         } else if (mouseButton == 1) {
-            expanded = !expanded;
-            updateSettingsVisibility();
-            // The parent container should re-layout all modules after expansion changes.
+            // Toggle the expanded state.
+            setExpanded(!expanded);
         }
     }
 
@@ -170,5 +169,16 @@ public class ClickGuiModuleButton {
 
     public Module getModule() {
         return module;
+    }
+
+    // Added getter for the expanded state.
+    public boolean isExpanded() {
+        return expanded;
+    }
+
+    // Added setter for the expanded state.
+    public void setExpanded(boolean expanded) {
+        this.expanded = expanded;
+        updateSettingsVisibility();
     }
 }

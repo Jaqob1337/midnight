@@ -4,7 +4,6 @@ import de.peter1337.midnight.manager.TextureManager;
 import de.peter1337.midnight.modules.Category;
 import de.peter1337.midnight.render.Render2D;
 import de.peter1337.midnight.render.Render2D.RenderShape;
-import de.peter1337.midnight.Midnight;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.util.Identifier;
@@ -23,11 +22,11 @@ public class ClickGuiCategoryButton {
     private final float initialY;
     private float currentY;
 
-    // Layout parameters
+    // Layout parameters.
     private final float buttonLine;
     private final float gapBetweenButtons;
 
-    // Button constants
+    // Button constants.
     private static final float BUTTON_WIDTH = 50f;
     private static final float BUTTON_HEIGHT = 50f;
     private static final float BUTTON_RADIUS = 5f;
@@ -36,7 +35,7 @@ public class ClickGuiCategoryButton {
     private static final Color BUTTON_SELECTED_COLOR = new Color(60, 60, 80, 255);
     private static final Color BUTTON_SELECTED_HOVER_COLOR = new Color(70, 70, 90, 255);
 
-    // Icon dimensions
+    // Icon dimensions.
     private int naturalIconWidth;
     private int naturalIconHeight;
     private float iconScale = 1.0f;
@@ -53,7 +52,6 @@ public class ClickGuiCategoryButton {
         String categoryName = (category == null || category.name().isEmpty()) ? "unknown" : category.name().toLowerCase();
         this.iconTexture = Identifier.of("midnight", "textures/gui/category/" + categoryName + ".png");
 
-        // Load image dimensions
         try {
             Optional<?> optResource = MinecraftClient.getInstance().getResourceManager().getResource(iconTexture);
             if (optResource.isPresent()) {
@@ -72,13 +70,11 @@ public class ClickGuiCategoryButton {
             naturalIconHeight = 24;
         }
 
-        // Calculate icon scale
         float scaleX = BUTTON_WIDTH / naturalIconWidth;
         float scaleY = BUTTON_HEIGHT / naturalIconHeight;
         float maxScale = Math.min(scaleX, scaleY);
         this.iconScale = maxScale * relativeScale;
 
-        // Create button shape
         button = render2D.createRoundedRect(0, 0, BUTTON_WIDTH, BUTTON_HEIGHT, BUTTON_RADIUS, BUTTON_COLOR);
         button.attachTo(parent, offsetX, buttonLine);
     }
@@ -86,31 +82,31 @@ public class ClickGuiCategoryButton {
     public void render(DrawContext context) {
         if (button.getParent() != null) {
             updateColor();
+            // Calculate icon position using float math, then round.
+            float iconX = button.getX() + (BUTTON_WIDTH - naturalIconWidth * iconScale) / 2;
+            float iconY = button.getY() + (BUTTON_HEIGHT - naturalIconHeight * iconScale) / 2;
+            int drawnWidth = Math.round(naturalIconWidth * iconScale);
+            int drawnHeight = Math.round(naturalIconHeight * iconScale);
+            int iconXInt = Math.round(iconX);
+            int iconYInt = Math.round(iconY);
 
-            // Calculate icon dimensions and position
-            int drawnWidth = (int)(naturalIconWidth * iconScale);
-            int drawnHeight = (int)(naturalIconHeight * iconScale);
-            float iconX = button.getX() + (BUTTON_WIDTH - drawnWidth) / 2;
-            float iconY = button.getY() + (BUTTON_HEIGHT - drawnHeight) / 2;
-
-            // Find main background panel for clipping
-            RenderShape background = button.getParent();
-            while (background.getParent() != null) {
-                background = background.getParent();
+            // Get the top-level background for clipping.
+            RenderShape bg = button.getParent();
+            while (bg.getParent() != null) {
+                bg = bg.getParent();
             }
 
-            // Draw the icon with clipping against the background bounds
             TextureManager.drawClippedTexture(
                     context,
                     iconTexture,
-                    iconX,
-                    iconY,
+                    iconXInt,
+                    iconYInt,
                     drawnWidth,
                     drawnHeight,
-                    background.getX(),
-                    background.getY(),
-                    background.getWidth(),
-                    background.getHeight()
+                    bg.getX(),
+                    bg.getY(),
+                    bg.getWidth(),
+                    bg.getHeight()
             );
         }
     }
@@ -153,11 +149,23 @@ public class ClickGuiCategoryButton {
         return button.isHovered(mouseX, mouseY);
     }
 
-    // Getters
-    public Category getCategory() { return category; }
-    public float getY() { return button.getY(); }
-    public float getHeight() { return BUTTON_HEIGHT; }
-    public float getWidth() { return BUTTON_WIDTH; }
-    public float getButtonLine() { return buttonLine; }
-    public float getGapBetweenButtons() { return gapBetweenButtons; }
+    public Category getCategory() {
+        return category;
+    }
+
+    public float getY() {
+        return button.getY();
+    }
+
+    public float getHeight() {
+        return BUTTON_HEIGHT;
+    }
+
+    public float getButtonLine() {
+        return buttonLine;
+    }
+
+    public float getGapBetweenButtons() {
+        return gapBetweenButtons;
+    }
 }

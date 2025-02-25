@@ -1,7 +1,9 @@
 package de.peter1337.midnight.render.screens.clickgui;
 
+import de.peter1337.midnight.manager.ConfigManager;
 import de.peter1337.midnight.manager.ModuleManager;
 import de.peter1337.midnight.modules.Category;
+import de.peter1337.midnight.modules.render.ClickGuiModule;
 import de.peter1337.midnight.render.GuiScreen;
 import de.peter1337.midnight.render.screens.clickgui.background.ClickGuiBackground;
 import de.peter1337.midnight.render.screens.clickgui.buttons.ClickGuiCategoryButton;
@@ -10,27 +12,34 @@ import de.peter1337.midnight.render.screens.clickgui.setting.SettingComponent;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.text.Text;
-
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 public class ClickGuiScreen extends GuiScreen {
 
     private ClickGuiBackground background;
     private final List<ClickGuiCategoryButton> categoryButtons = new ArrayList<>();
-    private final Map<Category, List<ClickGuiModuleButton>> moduleButtons = new HashMap<>();
+    private final Map<Category, List<ClickGuiModuleButton>> moduleButtons = new java.util.HashMap<>();
     private Category selectedCategory = null;
 
+    // Current and target scroll values.
     private float targetCategoryScroll = 0f;
     private float currentCategoryScroll = 0f;
     private float targetModuleScroll = 0f;
     private float currentModuleScroll = 0f;
-    private static final float SCROLL_SPEED = 15f;
-    private static final float SCROLL_ANIMATION_SPEED = 0.02f;
+
+    // Animation parameters.
+    private static final float SCROLL_SPEED = 28f;
+    private static final float SCROLL_ANIMATION_SPEED = 0.15f;
+    private static final float SNAP_THRESHOLD = 0.5f;
+
     private static final float CATEGORY_SPACING = 60f;
     private static final float INITIAL_CATEGORY_OFFSET_Y = 11f;
     private static final float MODULES_TOP_MARGIN = 20f;
     private static final float CATEGORY_GAP = 10f;
     private static final float ICON_SCALE = 0.9f;
+    private static final float CATEGORY_MARGIN = 10f;
 
     public ClickGuiScreen() {
         super(Text.literal("ClickGUI"));
@@ -39,27 +48,53 @@ public class ClickGuiScreen extends GuiScreen {
     @Override
     public void init() {
         super.init();
-        MinecraftClient.getInstance().options.getMenuBackgroundBlurriness().setValue(0);
-
         background = new ClickGuiBackground(render2D, width, height);
+        ConfigManager.setClickGuiBackground(background);
+
+        // Load only the ClickGUI UI state (scroll, selected category, expanded states).
+        var clickGuiModule = ModuleManager.getModule("ClickGUI");
+        if (clickGuiModule instanceof ClickGuiModule && ((ClickGuiModule) clickGuiModule).isPositionSavingEnabled()) {
+            ConfigManager.loadConfig("lastclickgui");
+        }
+
         categoryButtons.clear();
         moduleButtons.clear();
-
-        targetCategoryScroll = 0f;
-        currentCategoryScroll = 0f;
+        targetCategoryScroll = ConfigManager.savedCategoryScroll;
+        currentCategoryScroll = ConfigManager.savedCategoryScroll;
         targetModuleScroll = 0f;
         currentModuleScroll = 0f;
 
         initializeCategories();
         initializeModules();
 
-        if (selectedCategory != null) {
-            categoryButtons.forEach(catButton ->
-                    catButton.setSelected(catButton.getCategory() == selectedCategory));
-            moduleButtons.get(selectedCategory).forEach(moduleButton ->
-                    moduleButton.setVisible(true));
+        // Set selected category using saved state.
+        if (ConfigManager.savedCategory != null && !ConfigManager.savedCategory.isEmpty()) {
+            for (Category cat : Category.values()) {
+                if (cat.name().equalsIgnoreCase(ConfigManager.savedCategory)) {
+                    selectedCategory = cat;
+                    break;
+                }
+            }
         }
-
+        if (selectedCategory == null && Category.values().length > 0) {
+            selectedCategory = Category.values()[0];
+        }
+        categoryButtons.forEach(catButton ->
+                catButton.setSelected(catButton.getCategory() == selectedCategory));
+        // Hide modules from all categories.
+        for (List<ClickGuiModuleButton> moduleList : moduleButtons.values()) {
+            for (ClickGuiModuleButton moduleButton : moduleList) {
+                moduleButton.setVisible(false);
+            }
+        }
+        if (selectedCategory != null && moduleButtons.containsKey(selectedCategory)) {
+            moduleButtons.get(selectedCategory).forEach(moduleButton -> {
+                moduleButton.setVisible(true);
+                if (ConfigManager.savedExpanded.containsKey(moduleButton.getModule().getName())) {
+                    moduleButton.setExpanded(ConfigManager.savedExpanded.get(moduleButton.getModule().getName()));
+                }
+            });
+        }
         render2D.setClipBounds(background.getBackground());
     }
 
@@ -70,9 +105,9 @@ public class ClickGuiScreen extends GuiScreen {
                     render2D,
                     category,
                     background.getBackground(),
-                    20f,              // offsetX
-                    currentOffsetY,   // y-coordinate
-                    CATEGORY_GAP,     // gap between buttons
+                    20f,
+                    currentOffsetY,
+                    CATEGORY_GAP,
                     ICON_SCALE
             );
             categoryButtons.add(categoryButton);
@@ -105,56 +140,44 @@ public class ClickGuiScreen extends GuiScreen {
     }
 
     @Override
-    public void setFocused(boolean focused) {
-        // Prevent screen dimming.
-    }
+    public void setFocused(boolean focused) { }
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
-        // Animate scrolls.
         currentCategoryScroll += (targetCategoryScroll - currentCategoryScroll) * SCROLL_ANIMATION_SPEED;
         currentModuleScroll += (targetModuleScroll - currentModuleScroll) * SCROLL_ANIMATION_SPEED;
 
-        // Update category button positions.
         categoryButtons.forEach(button -> button.updatePosition(currentCategoryScroll));
-
-        // Update module buttons for the selected category.
         if (selectedCategory != null) {
             float cumulativeY = MODULES_TOP_MARGIN - currentModuleScroll;
             for (ClickGuiModuleButton moduleButton : moduleButtons.get(selectedCategory)) {
                 moduleButton.updatePosition(cumulativeY);
-                cumulativeY += moduleButton.getTotalHeight() + 5f;  // 5f is spacing between module buttons.
+                cumulativeY += moduleButton.getTotalHeight() + 5f;
             }
         }
-
         super.render(context, mouseX, mouseY, delta);
-
-        // Render categories.
         categoryButtons.forEach(button -> {
             button.updateColor();
             button.render(context);
         });
-
-        // Render modules.
         moduleButtons.values().stream()
-                .flatMap(List::stream)
+                .flatMap(list -> list.stream())
                 .forEach(moduleButton -> {
                     moduleButton.update();
                     moduleButton.render(context);
                 });
+
+        ConfigManager.savedCategoryScroll = currentCategoryScroll;
     }
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        // First, check module buttons and their settings.
         if (selectedCategory != null) {
-            List<ClickGuiModuleButton> currentModules = moduleButtons.get(selectedCategory);
-            for (ClickGuiModuleButton moduleButton : currentModules) {
+            for (ClickGuiModuleButton moduleButton : moduleButtons.get(selectedCategory)) {
                 if (moduleButton.isHovered(mouseX, mouseY)) {
                     moduleButton.onClick(button);
                     return true;
                 }
-                // Also check settings if the module is expanded.
                 for (SettingComponent setting : moduleButton.getSettingComponents()) {
                     if (setting.isHovered(mouseX, mouseY)) {
                         setting.onClick(mouseX, mouseY);
@@ -163,23 +186,41 @@ public class ClickGuiScreen extends GuiScreen {
                 }
             }
         }
-
-        // Then check category buttons.
         for (ClickGuiCategoryButton categoryButton : categoryButtons) {
             if (categoryButton.isHovered(mouseX, mouseY)) {
                 if (selectedCategory != categoryButton.getCategory()) {
-                    if (selectedCategory != null) {
-                        moduleButtons.get(selectedCategory).forEach(moduleButton ->
-                                moduleButton.setVisible(false));
+                    if (selectedCategory != null && moduleButtons.containsKey(selectedCategory)) {
+                        for (ClickGuiModuleButton moduleButton : moduleButtons.get(selectedCategory)) {
+                            ConfigManager.savedExpanded.put(moduleButton.getModule().getName(), moduleButton.isExpanded());
+                        }
+                    }
+                    for (List<ClickGuiModuleButton> moduleList : moduleButtons.values()) {
+                        for (ClickGuiModuleButton moduleButton : moduleList) {
+                            moduleButton.setVisible(false);
+                        }
                     }
                     selectedCategory = categoryButton.getCategory();
                     targetModuleScroll = 0f;
                     currentModuleScroll = 0f;
                     moduleButtons.get(selectedCategory).forEach(moduleButton -> {
                         moduleButton.setVisible(true);
+                        if (ConfigManager.savedExpanded.containsKey(moduleButton.getModule().getName())) {
+                            moduleButton.setExpanded(ConfigManager.savedExpanded.get(moduleButton.getModule().getName()));
+                        }
                     });
                     categoryButtons.forEach(catButton ->
                             catButton.setSelected(catButton.getCategory() == selectedCategory));
+
+                    float btnY = categoryButton.getY();
+                    float btnH = categoryButton.getHeight();
+                    float clipY = background.getBackground().getY();
+                    float clipH = background.getBackground().getHeight();
+
+                    if (btnY < clipY + CATEGORY_MARGIN) {
+                        targetCategoryScroll -= (clipY + CATEGORY_MARGIN - btnY);
+                    } else if (btnY + btnH > clipY + clipH - CATEGORY_MARGIN) {
+                        targetCategoryScroll += (btnY + btnH - (clipY + clipH - CATEGORY_MARGIN));
+                    }
                 }
                 return true;
             }
@@ -190,8 +231,7 @@ public class ClickGuiScreen extends GuiScreen {
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
         if (selectedCategory != null) {
-            List<ClickGuiModuleButton> currentModules = moduleButtons.get(selectedCategory);
-            for (ClickGuiModuleButton moduleButton : currentModules) {
+            for (ClickGuiModuleButton moduleButton : moduleButtons.get(selectedCategory)) {
                 for (SettingComponent setting : moduleButton.getSettingComponents()) {
                     if (setting.isHovered(mouseX, mouseY)) {
                         setting.onMouseDrag(mouseX, mouseY);
@@ -206,8 +246,7 @@ public class ClickGuiScreen extends GuiScreen {
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
         if (selectedCategory != null) {
-            List<ClickGuiModuleButton> currentModules = moduleButtons.get(selectedCategory);
-            for (ClickGuiModuleButton moduleButton : currentModules) {
+            for (ClickGuiModuleButton moduleButton : moduleButtons.get(selectedCategory)) {
                 for (SettingComponent setting : moduleButton.getSettingComponents()) {
                     if (setting.isHovered(mouseX, mouseY)) {
                         setting.onMouseUp(mouseX, mouseY);
@@ -225,11 +264,11 @@ public class ClickGuiScreen extends GuiScreen {
             float totalCategoryHeight = categoryButtons.size() * CATEGORY_SPACING;
             float visibleHeight = background.getBackground().getHeight() - INITIAL_CATEGORY_OFFSET_Y;
             float maxScroll = Math.max(0, totalCategoryHeight - visibleHeight);
-            targetCategoryScroll = Math.max(0, Math.min(targetCategoryScroll - (float)verticalAmount * SCROLL_SPEED, maxScroll));
+            targetCategoryScroll = Math.max(0, Math.min(targetCategoryScroll - (float) verticalAmount * SCROLL_SPEED, maxScroll));
             return true;
         } else if (selectedCategory != null && isMouseOverModules(mouseX, mouseY)) {
             float maxScroll = calculateMaxModuleScroll();
-            targetModuleScroll = Math.max(0, Math.min(targetModuleScroll - (float)verticalAmount * SCROLL_SPEED, maxScroll));
+            targetModuleScroll = Math.max(0, Math.min(targetModuleScroll - (float) verticalAmount * SCROLL_SPEED, maxScroll));
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
@@ -269,6 +308,25 @@ public class ClickGuiScreen extends GuiScreen {
 
     @Override
     public void close() {
+        // Save the last selected category.
+        ConfigManager.savedCategory = (selectedCategory != null ? selectedCategory.name() : "");
+        // Save expanded state from all module buttons.
+        ConfigManager.savedExpanded.clear();
+        for (List<ClickGuiModuleButton> moduleList : moduleButtons.values()) {
+            for (ClickGuiModuleButton moduleButton : moduleList) {
+                ConfigManager.savedExpanded.put(moduleButton.getModule().getName(), moduleButton.isExpanded());
+            }
+        }
+        // Save category scroll position.
+        ConfigManager.savedCategoryScroll = currentCategoryScroll;
+
+        var clickGuiModule = ModuleManager.getModule("ClickGUI");
+        if (clickGuiModule instanceof ClickGuiModule && ((ClickGuiModule) clickGuiModule).isPositionSavingEnabled()) {
+            ConfigManager.saveConfig("lastclickgui");
+        }
+        if (clickGuiModule != null && clickGuiModule.isEnabled()) {
+            clickGuiModule.toggle();
+        }
         MinecraftClient.getInstance().options.getMenuBackgroundBlurriness().setValue(8);
         super.close();
     }

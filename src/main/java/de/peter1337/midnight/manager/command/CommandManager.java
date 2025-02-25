@@ -3,6 +3,7 @@ package de.peter1337.midnight.manager.command;
 import de.peter1337.midnight.Midnight;
 import de.peter1337.midnight.manager.BindManager;
 import de.peter1337.midnight.manager.ModuleManager;
+import de.peter1337.midnight.manager.ConfigManager; // Import the new config manager
 import de.peter1337.midnight.modules.Module;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.minecraft.client.MinecraftClient;
@@ -10,9 +11,6 @@ import net.minecraft.text.Text;
 
 import java.util.List;
 
-/**
- * CommandManager listens for in-game chat commands and processes them.
- */
 public class CommandManager {
 
     public static void init() {
@@ -24,7 +22,6 @@ public class CommandManager {
             }
             return true;
         });
-
         Midnight.LOGGER.info("Command system initialized");
     }
 
@@ -83,12 +80,29 @@ public class CommandManager {
             }
             module.toggle();
             sendMessage(module.getName() + " is now " + (module.isEnabled() ? "enabled" : "disabled"));
+        } else if (args[0].equalsIgnoreCase("config")) {
+            if (args.length < 3) {
+                sendMessage("Usage: .config <save/load> <name>");
+                return;
+            }
+            String subCommand = args[1];
+            String configName = args[2];
+            if (subCommand.equalsIgnoreCase("save")) {
+                ConfigManager.saveConfig(configName);
+                sendMessage("Saved config: " + configName);
+            } else if (subCommand.equalsIgnoreCase("load")) {
+                ConfigManager.loadConfig(configName);
+                sendMessage("Loaded config: " + configName);
+            } else {
+                sendMessage("Unknown config command: " + subCommand);
+            }
         } else if (args[0].equalsIgnoreCase("help")) {
             // Display all available commands.
             sendMessage("Available commands:");
-            sendMessage(" - .bind <module> <key> : Bind a key to a module");
-            sendMessage(" - .list              : List all modules");
-            sendMessage(" - .toggle <module>   : Toggle a module on/off");
+            sendMessage(" - .bind <module> <key>         : Bind a key to a module");
+            sendMessage(" - .list                       : List all modules");
+            sendMessage(" - .toggle <module>            : Toggle a module on/off");
+            sendMessage(" - .config <save/load> <name>  : Save or load a config");
         }
     }
 

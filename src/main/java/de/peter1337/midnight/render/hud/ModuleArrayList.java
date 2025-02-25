@@ -2,6 +2,7 @@ package de.peter1337.midnight.render.hud;
 
 import de.peter1337.midnight.manager.ModuleManager;
 import de.peter1337.midnight.modules.Module;
+import de.peter1337.midnight.modules.render.ClickGuiModule;
 import de.peter1337.midnight.render.font.CustomFontRenderer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.util.math.MatrixStack;
@@ -14,7 +15,7 @@ public class ModuleArrayList {
     private static final int RIGHT_MARGIN = 8;
     private static final int TOP_MARGIN = 2;
     // Desired font size for the module array list.
-    private static final float FONT_SIZE = 11f;
+    private static final float FONT_SIZE = 12f;
 
     public static void render(MatrixStack matrices) {
         MinecraftClient mc = MinecraftClient.getInstance();
@@ -25,8 +26,18 @@ public class ModuleArrayList {
 
         int screenWidth = mc.getWindow().getScaledWidth();
 
+        // Filter out ClickGUI module if desired.
         List<Module> enabledModules = ModuleManager.getModules().stream()
                 .filter(Module::isEnabled)
+                .filter(module -> {
+                    // If the module is an instance of ClickGuiModule, hide it
+                    // or check its position saving setting if needed.
+                    if (module instanceof ClickGuiModule) {
+                        // Return false to exclude it from the list.
+                        return false;
+                    }
+                    return true;
+                })
                 .collect(Collectors.toList());
 
         int y = TOP_MARGIN;

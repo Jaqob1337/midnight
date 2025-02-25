@@ -8,23 +8,23 @@ import net.minecraft.client.MinecraftClient;
 
 public class ClickGuiModule extends Module {
 
-    // Setting that prevents resetting module button positions when enabled.
-    private final Setting<Boolean> disableResetPosition = register(
-            new Setting<>("DisableResetPosition", Boolean.FALSE, "Prevents module button positions from resetting when opening the ClickGUI")
+    // New setting: if enabled, the ClickGUI panel position will be saved and restored.
+    private final Setting<Boolean> positionSaving = register(
+            new Setting<>("PositionSaving", Boolean.TRUE, "Saves and loads the ClickGUI panel position")
     );
 
     public ClickGuiModule() {
         super("ClickGUI", "Opens the client ClickGUI", Category.RENDER, "rshift");
     }
 
-    public boolean isResetDisabled() {
-        return disableResetPosition.getValue();
+
+    public boolean isPositionSavingEnabled() {
+        return positionSaving.getValue();
     }
 
     @Override
     public void onEnable() {
+        // Open the GUI; do not immediately toggle off.
         MinecraftClient.getInstance().setScreen(new ClickGuiScreen());
-        // Immediately disable this module so it only acts as a trigger.
-        toggle();
     }
 }

@@ -3,6 +3,7 @@ package de.peter1337.midnight.modules.movement;
 import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.modules.Category;
 import de.peter1337.midnight.modules.Setting;
+import java.util.Arrays;
 import net.minecraft.client.MinecraftClient;
 
 public class Sprint extends Module {
@@ -21,7 +22,12 @@ public class Sprint extends Module {
             new Setting<>("JumpDelay", 0.5f, 0.1f, 2.0f, "Delay (in seconds) between jumps")
     );
 
-    // Timestamp to track the last jump
+    // New dropdown setting for sprint mode.
+    private final Setting<String> sprintMode = register(
+            new Setting<>("SprintMode", "Default", Arrays.asList("Default", "Hold", "Toggle"), "Select sprint mode")
+    );
+
+    // Timestamp to track the last jump.
     private long lastJumpTime = 0;
 
     public Sprint() {
@@ -48,31 +54,35 @@ public class Sprint extends Module {
 
         boolean shouldSprint;
 
-        // Check OmniSprint setting
+        // Check OmniSprint setting.
         if (omniSprint.getValue()) {
             shouldSprint = mc.player.input.movementForward != 0 || mc.player.input.movementSideways != 0;
         } else {
             shouldSprint = mc.player.input.movementForward > 0;
         }
 
-        // Basic sprint checks
+        // Basic sprint checks.
         if (shouldSprint) {
             if (mc.player.isSneaking() || mc.player.isUsingItem() || mc.player.horizontalCollision) {
                 shouldSprint = false;
             }
         }
 
-        // Apply sprint state
+        // Apply sprint state.
         mc.player.setSprinting(shouldSprint);
 
-        // Handle JumpSprint - Automatically jump when sprinting, on ground, and after the jump delay.
+        // Handle JumpSprint.
         if (shouldSprint && jumpSprint.getValue() && mc.player.isOnGround()) {
             long currentTime = System.currentTimeMillis();
-            float delaySeconds = jumpDelay.getValue(); // jumpDelay is in seconds
+            float delaySeconds = jumpDelay.getValue();
             if (currentTime - lastJumpTime >= delaySeconds * 1000) {
                 mc.player.jump();
                 lastJumpTime = currentTime;
             }
         }
+
+        // Use sprintMode.getValue() to modify behavior as needed.
+        // For example:
+        // System.out.println("Sprint Mode: " + sprintMode.getValue());
     }
 }
