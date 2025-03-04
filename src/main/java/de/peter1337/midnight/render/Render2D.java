@@ -10,12 +10,16 @@ public class Render2D {
     private static final MinecraftClient client = MinecraftClient.getInstance();
     private final ShaderManager shaderManager;
     private final List<RenderShape> shapes;
+    // Main clipping shape (e.g. main panel)
     private RenderShape clipBounds;
+    // Secondary clipping shape (e.g. module section)
+    private RenderShape moduleClipBounds;
 
     public Render2D() {
         this.shaderManager = new ShaderManager();
         this.shapes = new ArrayList<>();
         this.clipBounds = null;
+        this.moduleClipBounds = null;
     }
 
     public void init(int width, int height) {
@@ -26,8 +30,28 @@ public class Render2D {
         shaderManager.cleanup();
     }
 
-    public void setClipBounds(RenderShape clipBounds) {
+    public void setMainClip(RenderShape clipBounds) {
         this.clipBounds = clipBounds;
+    }
+
+    public void setModuleClip(RenderShape moduleClipBounds) {
+        this.moduleClipBounds = moduleClipBounds;
+    }
+
+    // Computes and sets the combined (intersected) clipping region.
+    public void setCombinedClipBounds(RenderShape shape1, RenderShape shape2) {
+        float x1 = Math.max(shape1.getX(), shape2.getX());
+        float y1 = Math.max(shape1.getY(), shape2.getY());
+        float x2 = Math.min(shape1.getX() + shape1.getWidth(), shape2.getX() + shape2.getWidth());
+        float y2 = Math.min(shape1.getY() + shape1.getHeight(), shape2.getY() + shape2.getHeight());
+        if (x2 < x1 || y2 < y1) {
+            shaderManager.setClipBounds(0, 0, 0, 0, 0);
+        } else {
+            float width = x2 - x1;
+            float height = y2 - y1;
+            float radius = Math.min(shape1.getRadius(), shape2.getRadius());
+            shaderManager.setClipBounds(x1, y1, width, height, radius);
+        }
     }
 
     public RenderShape createRoundedRect(float x, float y, float width, float height, float radius, Color color) {
@@ -48,18 +72,37 @@ public class Render2D {
         return shape;
     }
 
+    // Render each shape using either the combined clip (if useCombinedClip is true) or only the main clip.
     public void renderShapes() {
-        if (clipBounds != null) {
-            shaderManager.setClipBounds(
-                    clipBounds.getX(),
-                    clipBounds.getY(),
-                    clipBounds.getWidth(),
-                    clipBounds.getHeight(),
-                    clipBounds.getRadius()
-            );
-        }
-
         for (RenderShape shape : shapes) {
+            if (shape.isUseCombinedClip()) {
+                if (clipBounds != null && moduleClipBounds != null) {
+                    setCombinedClipBounds(clipBounds, moduleClipBounds);
+                } else if (clipBounds != null) {
+                    shaderManager.setClipBounds(
+                            clipBounds.getX(),
+                            clipBounds.getY(),
+                            clipBounds.getWidth(),
+                            clipBounds.getHeight(),
+                            clipBounds.getRadius()
+                    );
+                } else {
+                    shaderManager.resetClipBounds();
+                }
+            } else {
+                // Only clip to the main panel.
+                if (clipBounds != null) {
+                    shaderManager.setClipBounds(
+                            clipBounds.getX(),
+                            clipBounds.getY(),
+                            clipBounds.getWidth(),
+                            clipBounds.getHeight(),
+                            clipBounds.getRadius()
+                    );
+                } else {
+                    shaderManager.resetClipBounds();
+                }
+            }
             shaderManager.drawShape(
                     shape.getX(),
                     shape.getY(),
@@ -72,10 +115,7 @@ public class Render2D {
                     shape.getOutlineWidth()
             );
         }
-
-        if (clipBounds != null) {
-            shaderManager.resetClipBounds();
-        }
+        shaderManager.resetClipBounds();
     }
 
     public boolean handleMouseClicked(double mouseX, double mouseY, int button) {
@@ -103,6 +143,8 @@ public class Render2D {
         }
     }
 
+    // ========================================================================
+    // Inner class representing a renderable shape.
     public static class RenderShape {
         private float x;
         private float y;
@@ -117,11 +159,12 @@ public class Render2D {
         private boolean isDragging;
         private float dragOffsetX;
         private float dragOffsetY;
-
         private RenderShape parent;
         private final List<RenderShape> children;
         private float relativeX;
         private float relativeY;
+        // New flag to choose between combined clipping and main-panel clipping.
+        private boolean useCombinedClip = true;
 
         private RenderShape(Builder builder) {
             this.x = builder.x;
@@ -204,7 +247,7 @@ public class Render2D {
             isDragging = false;
         }
 
-        // Getters and Setters
+        // Getters and setters.
         public float getX() { return x; }
         public float getY() { return y; }
         public float getWidth() { return width; }
@@ -229,6 +272,14 @@ public class Render2D {
             this.x = x;
             this.y = y;
             updateChildren(deltaX, deltaY);
+        }
+
+        public boolean isUseCombinedClip() {
+            return useCombinedClip;
+        }
+
+        public void setUseCombinedClip(boolean useCombinedClip) {
+            this.useCombinedClip = useCombinedClip;
         }
 
         public static class Builder {
@@ -265,7 +316,6 @@ public class Render2D {
                 this.outlineWidth = width;
                 return this;
             }
-
 
             public RenderShape build() {
                 return new RenderShape(this);

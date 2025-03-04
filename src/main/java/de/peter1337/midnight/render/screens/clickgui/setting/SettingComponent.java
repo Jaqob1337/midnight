@@ -4,6 +4,7 @@ import de.peter1337.midnight.render.Render2D;
 import de.peter1337.midnight.render.Render2D.RenderShape;
 import de.peter1337.midnight.render.font.CustomFontRenderer;
 import de.peter1337.midnight.modules.Setting;
+import de.peter1337.midnight.render.screens.clickgui.setting.toggle.DropdownComponent;
 import de.peter1337.midnight.render.screens.clickgui.setting.toggle.SliderComponent;
 import de.peter1337.midnight.render.screens.clickgui.setting.toggle.ToggleComponent;
 import net.minecraft.client.gui.DrawContext;
@@ -17,11 +18,12 @@ public class SettingComponent {
     private final CustomFontRenderer fontRenderer;
     private ToggleComponent toggleComponent;  // For Boolean settings
     private SliderComponent sliderComponent;    // For numeric settings
+    private DropdownComponent dropdownComponent; // For dropdown (String) settings
     private boolean visible;
 
     // Layout constants.
     private static final float HEIGHT = 20f;
-    private static final float PADDING = 1f;
+    private static final float PADDING = 5f;
     private static final Color BG_COLOR = new Color(25, 25, 45, 255);
     private static final Color TRANSPARENT = new Color(0, 0, 0, 0);
 
@@ -31,6 +33,9 @@ public class SettingComponent {
     private float totalWidth = 0f;
     private float sliderWidth = 0f;
     private final float valueDisplayWidth;
+
+    // Dropdown width for right-aligned dropdowns
+    private static final float DROPDOWN_WIDTH = 150f;
 
     public SettingComponent(Render2D render2D, Setting<?> setting, RenderShape parent, float yOffset) {
         this.setting = setting;
@@ -44,6 +49,7 @@ public class SettingComponent {
         totalWidth = parent.getWidth();
         sliderWidth = totalWidth - (textWidth + EXTRA_SPACING + valueDisplayWidth);
 
+        // Create a background shape for the setting.
         background = render2D.createRoundedRect(
                 parent.getX(),
                 parent.getY() + yOffset,
@@ -63,14 +69,91 @@ public class SettingComponent {
             float sliderX = background.getX() + sliderXOffset;
             float sliderY = background.getY() + (HEIGHT - SliderComponent.SLIDER_HEIGHT) / 2;
             sliderComponent = new SliderComponent(render2D, background, sliderX, sliderY, sliderWidth, (Setting<? extends Number>) setting);
-
             setVisible(false);
+        } else if (setting.getValue() instanceof String && setting.getOptions() != null) {
+            // For dropdown settings, position at the right side like the toggle
+            float dropdownX = background.getX() + totalWidth - DROPDOWN_WIDTH - PADDING;
+            float dropdownY = background.getY() + (HEIGHT - DropdownComponent.DROPDOWN_HEIGHT) / 2;
+            dropdownComponent = new DropdownComponent(
+                    render2D,
+                    background,
+                    dropdownX,
+                    dropdownY,
+                    DROPDOWN_WIDTH,
+                    (Setting<String>) setting,
+                    ((Setting<String>) setting).getOptions()
+            );
         }
+    }
+
+    public float getTotalHeight() {
+        if (!visible) return 0;
+
+        // Base height of the setting component
+        float height = HEIGHT;
+
+        // Add dropdown options height if this has an expanded dropdown
+        if (dropdownComponent != null && dropdownComponent.isExpanded()) {
+            // Add height for each option in the dropdown
+            height += dropdownComponent.isExpanded() ?
+                    (dropdownComponent.getOptionsCount() * DropdownComponent.DROPDOWN_HEIGHT) : 0;
+        }
+
+        return height;
     }
 
     public void render(DrawContext context) {
         if (!visible) return;
 
+        // Find the top-level container (main panel)
+        RenderShape mainPanel = background;
+        while (mainPanel.getParent() != null) {
+            mainPanel = mainPanel.getParent();
+        }
+
+        // Find the module section panel if available
+        RenderShape moduleSection = findModuleSectionPanel(background);
+
+        // Calculate maximum width for text to prevent overlap with controls
+        float maxTextWidth;
+        if (toggleComponent != null) {
+            maxTextWidth = totalWidth - ToggleComponent.TOGGLE_WIDTH - (PADDING * 2);
+        } else if (dropdownComponent != null) {
+            maxTextWidth = totalWidth - DROPDOWN_WIDTH - (PADDING * 2);
+        } else if (sliderComponent != null) {
+            maxTextWidth = sliderXOffset - PADDING;
+        } else {
+            maxTextWidth = totalWidth - (PADDING * 2);
+        }
+
+        // Set clipping for the setting name text
+        fontRenderer.setClipBounds(
+                background.getX() + PADDING,
+                background.getY(),
+                maxTextWidth,
+                HEIGHT
+        );
+
+        // Add additional clip regions for both the main panel and module section
+        fontRenderer.clearAdditionalClipRegions();
+        fontRenderer.addClipRegion(
+                mainPanel.getX(),
+                mainPanel.getY(),
+                mainPanel.getWidth(),
+                mainPanel.getHeight()
+        );
+
+        // If we found a module section panel, add it as an additional clip region
+        if (moduleSection != null) {
+            fontRenderer.addClipRegion(
+                    moduleSection.getX(),
+                    moduleSection.getY(),
+                    moduleSection.getWidth(),
+                    moduleSection.getHeight()
+            );
+        }
+
+        // Render the setting name with all clipping regions applied
         fontRenderer.drawStringWithShadow(
                 context.getMatrices(),
                 setting.getName(),
@@ -80,6 +163,10 @@ public class SettingComponent {
                 0x55000000
         );
 
+        // Reset clipping after drawing
+        fontRenderer.resetClipBounds();
+
+        // Render components
         if (toggleComponent != null) {
             toggleComponent.render(context, (Boolean) setting.getValue());
         }
@@ -88,7 +175,9 @@ public class SettingComponent {
             float fraction = (currentValue - sliderComponent.getMinValue()) / (sliderComponent.getMaxValue() - sliderComponent.getMinValue());
             sliderComponent.render(context, fraction);
         }
-
+        if (dropdownComponent != null && setting.getValue() instanceof String) {
+            dropdownComponent.render(context);
+        }
     }
 
     public void updatePosition(float yOffset) {
@@ -102,7 +191,12 @@ public class SettingComponent {
                 float sliderY = background.getY() + (HEIGHT - SliderComponent.SLIDER_HEIGHT) / 2;
                 sliderComponent.updatePosition(background, sliderX, sliderY);
             }
-
+            if (dropdownComponent != null) {
+                // Update dropdown to stay right-aligned
+                float dropdownX = background.getX() + totalWidth - DROPDOWN_WIDTH - PADDING;
+                float dropdownY = background.getY() + (HEIGHT - DropdownComponent.DROPDOWN_HEIGHT) / 2;
+                dropdownComponent.updatePosition(dropdownX, dropdownY);
+            }
         }
     }
 
@@ -115,19 +209,33 @@ public class SettingComponent {
         if (sliderComponent != null) {
             sliderComponent.setVisible(visible);
         }
-
+        if (dropdownComponent != null) {
+            dropdownComponent.setVisible(visible);
+        }
     }
 
     public float getHeight() {
         return HEIGHT;
     }
 
+    /**
+     * Updated hit detection to include the extended area of an expanded dropdown.
+     */
     public boolean isHovered(double mouseX, double mouseY) {
         if (!visible) return false;
-        return mouseX >= background.getX() &&
+
+        // Base hitbox for the setting (the 20f height area).
+        boolean baseHovered = mouseX >= background.getX() &&
                 mouseX <= background.getX() + background.getWidth() &&
                 mouseY >= background.getY() &&
                 mouseY <= background.getY() + HEIGHT;
+
+        // If a dropdown is present and expanded, check its full area.
+        if (dropdownComponent != null && dropdownComponent.isExpanded()) {
+            return baseHovered || dropdownComponent.isMouseOver(mouseX, mouseY);
+        }
+
+        return baseHovered;
     }
 
     public boolean isToggleHovered(double mouseX, double mouseY) {
@@ -143,6 +251,8 @@ public class SettingComponent {
             toggleComponent.startAnimation();
         } else if (sliderComponent != null && setting.getValue() instanceof Number) {
             sliderComponent.onMouseDown(mouseX, mouseY);
+        } else if (dropdownComponent != null && setting.getValue() instanceof String) {
+            dropdownComponent.onMouseDown(mouseX, mouseY);
         }
     }
 
@@ -150,11 +260,44 @@ public class SettingComponent {
         if (sliderComponent != null && setting.getValue() instanceof Number) {
             sliderComponent.onDrag(mouseX);
         }
+        // Dropdowns typically do not require drag handling.
     }
 
     public void onMouseUp(double mouseX, double mouseY) {
         if (sliderComponent != null && setting.getValue() instanceof Number) {
             sliderComponent.onMouseUp(mouseX, mouseY);
         }
+        // Dropdowns typically do not require a mouse up handler.
+    }
+
+    /**
+     * Tries to find the module section panel in the container hierarchy.
+     * This is a heuristic that looks for shapes that might be the module section panel.
+     *
+     * @param container The container to start searching from
+     * @return The module section panel, or null if not found
+     */
+    private RenderShape findModuleSectionPanel(RenderShape container) {
+        // Check if this container has children that are likely to be the module section
+        List<RenderShape> children = container.getChildren();
+        if (children != null) {
+            for (RenderShape child : children) {
+                // In your ClickGuiBackground, the module section is the second shape created
+                // and has specific dimensions. This is a heuristic to find it.
+                if (child.getWidth() > container.getWidth() * 0.6f &&
+                        child.getHeight() > container.getHeight() * 0.8f) {
+                    // This looks like the module section panel
+                    return child;
+                }
+            }
+        }
+
+        // If we didn't find it at this level, check the parent
+        if (container.getParent() != null) {
+            return findModuleSectionPanel(container.getParent());
+        }
+
+        // If we get here, we couldn't find it
+        return null;
     }
 }

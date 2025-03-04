@@ -27,6 +27,8 @@ public class ClickGuiBackground {
         overlay = render2D.createRoundedRect(
                 0, 0, screenWidth, screenHeight, 0, OVERLAY_COLOR
         );
+        // Ensure overlay is drawn in full.
+        overlay.setUseCombinedClip(false);
 
         // Create main panel
         float panelX = (screenWidth - PANEL_WIDTH) / 2f;
@@ -36,6 +38,8 @@ public class ClickGuiBackground {
                 panelX, panelY, PANEL_WIDTH, PANEL_HEIGHT, PANEL_RADIUS, PANEL_COLOR
         );
         background.setDraggable(true);
+        // Main panel should render fully (old behavior), so disable combined clipping.
+        background.setUseCombinedClip(false);
 
         // Create module section background that extends to the right edge
         float moduleSectionX = panelX + PANEL_WIDTH * 0.3f + MODULE_SECTION_MARGIN;
@@ -50,7 +54,10 @@ public class ClickGuiBackground {
                 MODULE_SECTION_RADIUS,
                 MODULE_SECTION_COLOR
         );
+        // Attach module section to the main panel.
         moduleSection.attachTo(background, PANEL_WIDTH * 0.3f + MODULE_SECTION_MARGIN, MODULE_SECTION_TOP_MARGIN);
+        // Module section background is drawn in full.
+        moduleSection.setUseCombinedClip(false);
     }
 
     public RenderShape getBackground() {

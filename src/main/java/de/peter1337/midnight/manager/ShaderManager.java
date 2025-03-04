@@ -142,7 +142,6 @@ public class ShaderManager {
         if (!initialized) return;
 
         int previousProgram = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
-
         GL20.glUseProgram(shaderProgram);
 
         int screenHeight = MinecraftClient.getInstance().getWindow().getScaledHeight();
@@ -154,7 +153,6 @@ public class ShaderManager {
         if (clipRadiusLocation != -1) {
             GL20.glUniform1f(clipRadiusLocation, radius);
         }
-
         GL20.glUseProgram(previousProgram);
     }
 
@@ -162,7 +160,6 @@ public class ShaderManager {
         if (!initialized) return;
 
         int previousProgram = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
-
         GL20.glUseProgram(shaderProgram);
         if (clipBoundsLocation != -1) {
             GL20.glUniform4f(clipBoundsLocation, 0, 0, 0, 0);
@@ -170,7 +167,6 @@ public class ShaderManager {
         if (clipRadiusLocation != -1) {
             GL20.glUniform1f(clipRadiusLocation, 0);
         }
-
         GL20.glUseProgram(previousProgram);
     }
 
@@ -234,7 +230,6 @@ public class ShaderManager {
                         fillColor.getAlpha() / 255f
                 );
             }
-
             if (outlineColor != null && outlineColorLocation != -1) {
                 GL20.glUniform4f(outlineColorLocation,
                         outlineColor.getRed() / 255f,
@@ -247,7 +242,6 @@ public class ShaderManager {
                 GL20.glUniform4f(outlineColorLocation, 0f, 0f, 0f, 0f);
                 if (outlineWidthLocation != -1) GL20.glUniform1f(outlineWidthLocation, 0f);
             }
-
             if (guiScaleLocation != -1) GL20.glUniform1f(guiScaleLocation, guiScale);
             if (transformLocation != -1) {
                 Matrix4f transform = new Matrix4f().identity();

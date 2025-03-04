@@ -25,7 +25,7 @@ public class CommandAutoComplete {
         if (client.currentScreen instanceof ChatScreen) {
             ChatScreen chatScreen = (ChatScreen) client.currentScreen;
             // Use a mixin accessor (ChatScreenAccessor) to get the private chat text field.
-            TextFieldWidget textField = ((de.peter1337.midnight.mixin.ChatScreenAccessor) chatScreen).getChatField();
+            TextFieldWidget textField = ((de.peter1337.midnight.mixins.ChatScreenAccessor) chatScreen).getChatField();
             if (textField != null) {
                 String currentText = textField.getText();
                 // Only work if the chat text starts with a dot.

@@ -16,6 +16,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import static de.peter1337.midnight.render.screens.clickgui.buttons.ClickGuiCategoryButton.BUTTON_HEIGHT;
+import static de.peter1337.midnight.render.screens.clickgui.buttons.ClickGuiModuleButton.SETTINGS_PADDING;
+
 public class ClickGuiScreen extends GuiScreen {
 
     private ClickGuiBackground background;
@@ -95,7 +98,9 @@ public class ClickGuiScreen extends GuiScreen {
                 }
             });
         }
-        render2D.setClipBounds(background.getBackground());
+        // Set both the main and module clip regions for combined clipping.
+        render2D.setMainClip(background.getBackground());
+        render2D.setModuleClip(background.getModuleSection());
     }
 
     private void initializeCategories() {
@@ -277,9 +282,22 @@ public class ClickGuiScreen extends GuiScreen {
     private float calculateMaxModuleScroll() {
         if (selectedCategory == null) return 0;
         float totalHeight = 0;
+
         for (ClickGuiModuleButton moduleButton : moduleButtons.get(selectedCategory)) {
-            totalHeight += moduleButton.getTotalHeight() + 5;
+            // Base module height
+            float moduleHeight = BUTTON_HEIGHT;
+
+            // If expanded, add heights of all settings including dropdowns
+            if (moduleButton.isExpanded()) {
+                for (SettingComponent setting : moduleButton.getSettingComponents()) {
+                    // Use the setting's total height which includes dropdown options if expanded
+                    moduleHeight += setting.getTotalHeight() + SETTINGS_PADDING;
+                }
+            }
+
+            totalHeight += moduleHeight + 5; // 5px spacing between modules
         }
+
         float visibleHeight = background.getBackground().getHeight() - MODULES_TOP_MARGIN;
         return Math.max(0, totalHeight - visibleHeight);
     }

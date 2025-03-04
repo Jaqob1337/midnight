@@ -1,4 +1,4 @@
-package de.peter1337.midnight.mixin;
+package de.peter1337.midnight.mixins;
 
 import de.peter1337.midnight.manager.ModuleManager;
 import net.minecraft.entity.Entity;

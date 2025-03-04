@@ -7,7 +7,6 @@ import de.peter1337.midnight.render.Render2D.RenderShape;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.util.Identifier;
-
 import javax.imageio.ImageIO;
 import java.awt.Color;
 import java.awt.image.BufferedImage;
@@ -28,7 +27,7 @@ public class ClickGuiCategoryButton {
 
     // Button constants.
     private static final float BUTTON_WIDTH = 50f;
-    private static final float BUTTON_HEIGHT = 50f;
+    public static final float BUTTON_HEIGHT = 50f;
     private static final float BUTTON_RADIUS = 5f;
     private static final Color BUTTON_COLOR = new Color(40, 40, 60, 255);
     private static final Color BUTTON_HOVER_COLOR = new Color(50, 50, 70, 255);
@@ -77,12 +76,13 @@ public class ClickGuiCategoryButton {
 
         button = render2D.createRoundedRect(0, 0, BUTTON_WIDTH, BUTTON_HEIGHT, BUTTON_RADIUS, BUTTON_COLOR);
         button.attachTo(parent, offsetX, buttonLine);
+        // For category buttons, use only the main panel clip (old behavior).
+        button.setUseCombinedClip(false);
     }
 
     public void render(DrawContext context) {
         if (button.getParent() != null) {
             updateColor();
-            // Calculate icon position using float math, then round.
             float iconX = button.getX() + (BUTTON_WIDTH - naturalIconWidth * iconScale) / 2;
             float iconY = button.getY() + (BUTTON_HEIGHT - naturalIconHeight * iconScale) / 2;
             int drawnWidth = Math.round(naturalIconWidth * iconScale);
@@ -90,7 +90,7 @@ public class ClickGuiCategoryButton {
             int iconXInt = Math.round(iconX);
             int iconYInt = Math.round(iconY);
 
-            // Get the top-level background for clipping.
+            // Get the top-level background (assumed to be the main panel).
             RenderShape bg = button.getParent();
             while (bg.getParent() != null) {
                 bg = bg.getParent();

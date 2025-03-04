@@ -2,6 +2,7 @@ package de.peter1337.midnight.manager;
 
 import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.modules.movement.Sprint;
+import de.peter1337.midnight.modules.player.Stealer;
 import de.peter1337.midnight.modules.render.ClickGuiModule;
 import de.peter1337.midnight.modules.render.ESP;
 import java.util.ArrayList;
@@ -16,6 +17,7 @@ public class ModuleManager {
         registerModule(new Sprint());
         registerModule(new ESP());
         registerModule(new ClickGuiModule());
+        registerModule(new Stealer());
     }
 
     private static void registerModule(Module module) {

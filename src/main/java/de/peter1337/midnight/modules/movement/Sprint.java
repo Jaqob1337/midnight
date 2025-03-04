@@ -22,13 +22,17 @@ public class Sprint extends Module {
             new Setting<>("JumpDelay", 0.5f, 0.1f, 2.0f, "Delay (in seconds) between jumps")
     );
 
-    // New dropdown setting for sprint mode.
+    // Dropdown setting for sprint mode.
     private final Setting<String> sprintMode = register(
-            new Setting<>("SprintMode", "Default", Arrays.asList("Default", "Hold", "Toggle"), "Select sprint mode")
+            new Setting<>("SprintMode", "Default", Arrays.asList("Default", "Hold", "Toggle", "Toggle2", "Toggle4"), "Select sprint mode")
     );
 
     // Timestamp to track the last jump.
     private long lastJumpTime = 0;
+
+    // Toggle state variables for "Toggle" mode.
+    private boolean sprintToggled = false;
+    private boolean wasSprintKeyPressed = false;
 
     public Sprint() {
         super("Sprint", "Automatically sprints whenever possible.", Category.MOVEMENT, "b");
@@ -39,6 +43,8 @@ public class Sprint extends Module {
         if (mc.player != null) {
             mc.player.setSprinting(true);
         }
+        sprintToggled = false;
+        wasSprintKeyPressed = false;
     }
 
     @Override
@@ -46,22 +52,54 @@ public class Sprint extends Module {
         if (mc.player != null) {
             mc.player.setSprinting(false);
         }
+        sprintToggled = false;
     }
 
     @Override
     public void onUpdate() {
         if (!isEnabled() || mc.player == null) return;
 
-        boolean shouldSprint;
+        boolean shouldSprint = false;
+        String mode = sprintMode.getValue();
 
-        // Check OmniSprint setting.
-        if (omniSprint.getValue()) {
-            shouldSprint = mc.player.input.movementForward != 0 || mc.player.input.movementSideways != 0;
-        } else {
-            shouldSprint = mc.player.input.movementForward > 0;
+        switch (mode) {
+            case "Default":
+                // Use omniSprint setting to decide based on movement input.
+                if (omniSprint.getValue()) {
+                    shouldSprint = mc.player.input.movementForward != 0 || mc.player.input.movementSideways != 0;
+                } else {
+                    shouldSprint = mc.player.input.movementForward > 0;
+                }
+                break;
+            case "Hold":
+                // Only sprint while the sprint key is held.
+                shouldSprint = mc.options.sprintKey.isPressed();
+                break;
+            case "Toggle":
+                // Toggle sprint when the sprint key is pressed.
+                boolean currentlyPressed = mc.options.sprintKey.isPressed();
+                if (currentlyPressed && !wasSprintKeyPressed) {
+                    sprintToggled = !sprintToggled;
+                }
+                wasSprintKeyPressed = currentlyPressed;
+
+                // When toggled on, use movement input (optionally omniSprint).
+                if (sprintToggled) {
+                    if (omniSprint.getValue()) {
+                        shouldSprint = mc.player.input.movementForward != 0 || mc.player.input.movementSideways != 0;
+                    } else {
+                        shouldSprint = mc.player.input.movementForward > 0;
+                    }
+                } else {
+                    shouldSprint = false;
+                }
+                break;
+            default:
+                shouldSprint = false;
+                break;
         }
 
-        // Basic sprint checks.
+        // Additional checks.
         if (shouldSprint) {
             if (mc.player.isSneaking() || mc.player.isUsingItem() || mc.player.horizontalCollision) {
                 shouldSprint = false;
@@ -81,8 +119,7 @@ public class Sprint extends Module {
             }
         }
 
-        // Use sprintMode.getValue() to modify behavior as needed.
-        // For example:
+        // Debug: Uncomment to print the current sprint mode.
         // System.out.println("Sprint Mode: " + sprintMode.getValue());
     }
 }

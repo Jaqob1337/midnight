@@ -1,6 +1,6 @@
 {
 	"required": true,
-	"package": "de.peter1337.midnight.mixin",
+	"package": "de.peter1337.midnight.mixins",
 	"compatibilityLevel": "JAVA_21",
 	"mixins": [
 		"ChatMixin",

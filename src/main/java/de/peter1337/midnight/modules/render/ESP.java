@@ -6,6 +6,8 @@ import de.peter1337.midnight.modules.Category;
 import de.peter1337.midnight.modules.Setting;
 import net.minecraft.client.MinecraftClient;
 
+import java.util.Arrays;
+
 public class ESP extends Module {
     private final MinecraftClient mc = MinecraftClient.getInstance();
     private boolean active = false;
@@ -17,6 +19,11 @@ public class ESP extends Module {
     private final Setting<Boolean> disableResetPosition = register(
             new Setting<>("DisableResetPosition", Boolean.FALSE, "Prevents module button positions from resetting when opening the ClickGUI")
     );
+
+    private final Setting<String> sprintMode = register(
+            new Setting<>("SprintMode", "Default", Arrays.asList("Default", "Hold", "Toggle", "Toggle2", "Toggle4"), "Select sprint mode")
+    );
+
     @Override
     public void onEnable() {
         active = true;

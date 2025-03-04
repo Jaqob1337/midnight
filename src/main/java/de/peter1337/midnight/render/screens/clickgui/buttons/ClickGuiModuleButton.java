@@ -28,7 +28,7 @@ public class ClickGuiModuleButton {
     private static final Color BUTTON_ENABLED_COLOR = new Color(45, 45, 65, 255);
     private static final Color TRANSPARENT = new Color(0, 0, 0, 0);
     private static final float FONT_SIZE = 11f;
-    private static final float SETTINGS_PADDING = 5f;
+    public static final float SETTINGS_PADDING = 5f;
 
     public ClickGuiModuleButton(Render2D render2D, Module module, RenderShape parent) {
         this.module = module;
@@ -48,6 +48,7 @@ public class ClickGuiModuleButton {
         initializeSettings(render2D);
     }
 
+
     private void initializeSettings(Render2D render2D) {
         float yOffset = BUTTON_HEIGHT + SETTINGS_PADDING;
         for (Setting<?> setting : module.getSettings()) {
@@ -66,11 +67,22 @@ public class ClickGuiModuleButton {
         }
     }
 
+
     /**
      * Renders the module button and its settings (if expanded).
      */
+
     public void render(DrawContext context) {
         if (!visible) return;
+
+        // Find the top-level container (main panel)
+        RenderShape mainPanel = button;
+        while (mainPanel.getParent() != null) {
+            mainPanel = mainPanel.getParent();
+        }
+
+        // Find the module section panel if available
+        RenderShape moduleSection = findModuleSectionPanel(button);
 
         // Center the module name.
         if (fontRenderer != null && button != null) {
@@ -79,6 +91,35 @@ public class ClickGuiModuleButton {
             float fontHeight = fontRenderer.getFontHeight();
             int textX = (int)(button.getX() + (BUTTON_WIDTH - textWidth) / 2);
             int textY = (int)(button.getY() + (BUTTON_HEIGHT - fontHeight) / 2f - 2.8f);
+
+            // Set up the basic clipping to the button itself
+            fontRenderer.setClipBounds(
+                    button.getX(),
+                    button.getY(),
+                    BUTTON_WIDTH,
+                    BUTTON_HEIGHT
+            );
+
+            // Add additional clip regions for both the main panel and module section
+            fontRenderer.clearAdditionalClipRegions();
+            fontRenderer.addClipRegion(
+                    mainPanel.getX(),
+                    mainPanel.getY(),
+                    mainPanel.getWidth(),
+                    mainPanel.getHeight()
+            );
+
+            // If we found a module section panel, add it as an additional clip region
+            if (moduleSection != null) {
+                fontRenderer.addClipRegion(
+                        moduleSection.getX(),
+                        moduleSection.getY(),
+                        moduleSection.getWidth(),
+                        moduleSection.getHeight()
+                );
+            }
+
+            // Draw the module name with clipping applied
             fontRenderer.drawStringWithShadow(
                     context.getMatrices(),
                     moduleName,
@@ -87,6 +128,9 @@ public class ClickGuiModuleButton {
                     module.isEnabled() ? 0xFFFFFFFF : 0xAAAAAAFF,
                     0x55000000
             );
+
+            // Reset clipping after drawing
+            fontRenderer.resetClipBounds();
         }
 
         // Render settings if expanded.
@@ -95,6 +139,37 @@ public class ClickGuiModuleButton {
                 setting.render(context);
             }
         }
+    }
+
+    /**
+     * Tries to find the module section panel in the container hierarchy.
+     * This is a heuristic that looks for shapes that might be the module section panel.
+     *
+     * @param container The container to start searching from
+     * @return The module section panel, or null if not found
+     */
+    private RenderShape findModuleSectionPanel(RenderShape container) {
+        // Check if this container has children that are likely to be the module section
+        List<RenderShape> children = container.getChildren();
+        if (children != null) {
+            for (RenderShape child : children) {
+                // In your ClickGuiBackground, the module section is the second shape created
+                // and has specific dimensions. This is a heuristic to find it.
+                if (child.getWidth() > container.getWidth() * 0.6f &&
+                        child.getHeight() > container.getHeight() * 0.8f) {
+                    // This looks like the module section panel
+                    return child;
+                }
+            }
+        }
+
+        // If we didn't find it at this level, check the parent
+        if (container.getParent() != null) {
+            return findModuleSectionPanel(container.getParent());
+        }
+
+        // If we get here, we couldn't find it
+        return null;
     }
 
     /**
@@ -143,9 +218,11 @@ public class ClickGuiModuleButton {
      */
     public float getTotalHeight() {
         if (!expanded) return BUTTON_HEIGHT;
+
         float total = BUTTON_HEIGHT;
         for (SettingComponent setting : settingComponents) {
-            total += setting.getHeight() + SETTINGS_PADDING;
+            // Use the setting's total height which includes any dropdown options
+            total += setting.getTotalHeight() + SETTINGS_PADDING;
         }
         return total;
     }

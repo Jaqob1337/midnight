@@ -1,4 +1,4 @@
-package de.peter1337.midnight.mixin;
+package de.peter1337.midnight.mixins;
 
 import net.minecraft.client.gui.screen.ChatScreen;
 import net.minecraft.client.gui.widget.TextFieldWidget;
