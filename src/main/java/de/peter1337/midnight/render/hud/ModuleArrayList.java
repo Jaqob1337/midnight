@@ -1,8 +1,8 @@
 package de.peter1337.midnight.render.hud;
 
 import de.peter1337.midnight.manager.ModuleManager;
+import de.peter1337.midnight.manager.ModuleVisibilityManager;
 import de.peter1337.midnight.modules.Module;
-import de.peter1337.midnight.modules.render.ClickGuiModule;
 import de.peter1337.midnight.render.font.CustomFontRenderer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.util.math.MatrixStack;
@@ -26,18 +26,10 @@ public class ModuleArrayList {
 
         int screenWidth = mc.getWindow().getScaledWidth();
 
-        // Filter out ClickGUI module if desired.
+        // Filter out modules that shouldn't be shown in the array list using the visibility manager.
         List<Module> enabledModules = ModuleManager.getModules().stream()
                 .filter(Module::isEnabled)
-                .filter(module -> {
-                    // If the module is an instance of ClickGuiModule, hide it
-                    // or check its position saving setting if needed.
-                    if (module instanceof ClickGuiModule) {
-                        // Return false to exclude it from the list.
-                        return false;
-                    }
-                    return true;
-                })
+                .filter(module -> !ModuleVisibilityManager.isHidden(module))
                 .collect(Collectors.toList());
 
         int y = TOP_MARGIN;

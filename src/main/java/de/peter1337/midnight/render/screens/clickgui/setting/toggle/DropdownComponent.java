@@ -70,7 +70,6 @@ public class DropdownComponent {
      * Creates and attaches option shapes for each option.
      * Called only once when expanding.
      */
-    // Find this method in the DropdownComponent class and modify it:
     private void createOptionShapes() {
         optionShapes.clear();
         float baseX = dropdownBox.getX();
@@ -80,13 +79,13 @@ public class DropdownComponent {
         for (String option : options) {
             // Change from createRoundedRect with radius 0 to using DROPDOWN_HEIGHT / 2 for rounded corners
             RenderShape optionShape = render2D.createRoundedRect(baseX, optionY,
-                    dropdownBox.getWidth(), DROPDOWN_HEIGHT, DROPDOWN_HEIGHT / 7, BOX_COLOR);
+                    dropdownBox.getWidth(), DROPDOWN_HEIGHT, DROPDOWN_HEIGHT / 100, BOX_COLOR);
             optionShape.attachTo(container, baseX - container.getX(), optionY - container.getY());
             optionShapes.add(optionShape);
             optionY += DROPDOWN_HEIGHT;
         }
-    }
 
+    }
     /**
      * Collapses the dropdown by setting each option's fill color to transparent and clearing the option shapes.
      */
@@ -96,6 +95,7 @@ public class DropdownComponent {
             optionShape.setFillColor(TRANSPARENT);
         }
         optionShapes.clear();
+
     }
 
     /**
@@ -114,6 +114,10 @@ public class DropdownComponent {
         // Render the current selected value on the dropdown button.
         String selectedValue = setting.getValue();
 
+        // Move our drawing forward in the Z-buffer so it appears on top
+        context.getMatrices().push();
+        context.getMatrices().translate(0, 0, 10);  // Move forward in Z to ensure dropdown is on top
+
         // Set up the basic clipping to the dropdown itself
         fontRenderer.setClipBounds(
                 dropdownBox.getX(),
@@ -124,12 +128,14 @@ public class DropdownComponent {
 
         // Add additional clip regions for both the main panel and module section
         fontRenderer.clearAdditionalClipRegions();
-        fontRenderer.addClipRegion(
-                mainPanel.getX(),
-                mainPanel.getY(),
-                mainPanel.getWidth(),
-                mainPanel.getHeight()
-        );
+        if (mainPanel != null) {
+            fontRenderer.addClipRegion(
+                    mainPanel.getX(),
+                    mainPanel.getY(),
+                    mainPanel.getWidth(),
+                    mainPanel.getHeight()
+            );
+        }
 
         // If we found a module section panel, add it as an additional clip region
         if (moduleSection != null) {
@@ -141,12 +147,16 @@ public class DropdownComponent {
             );
         }
 
+        // Calculate perfect vertical center position for text
+        int fontHeight = fontRenderer.getFontHeight();
+        int textY = (int) (dropdownBox.getY() + (DROPDOWN_HEIGHT - fontHeight) / 30.0f);
+
         // Render the text with all clipping regions applied
         fontRenderer.drawStringWithShadow(
                 context.getMatrices(),
                 selectedValue,
                 (int) (dropdownBox.getX() + PADDING),
-                (int) (dropdownBox.getY() + (DROPDOWN_HEIGHT - fontRenderer.getFontHeight()) / 2),
+                textY,
                 TEXT_COLOR.getRGB(),
                 0x55000000
         );
@@ -159,6 +169,7 @@ public class DropdownComponent {
         // Check visible state via dropdownBox fill color.
         if (dropdownBox.getFillColor().equals(TRANSPARENT)) {
             // Do not render options if the component is invisible.
+            context.getMatrices().pop();  // Restore matrix stack
             return;
         }
 
@@ -214,12 +225,15 @@ public class DropdownComponent {
                     );
                 }
 
+                // Calculate vertical center for option text
+                int optionTextY = (int) (optionShape.getY() + (DROPDOWN_HEIGHT - fontHeight) / 2.0f);
+
                 // Draw the option text with all clipping applied
                 fontRenderer.drawStringWithShadow(
                         context.getMatrices(),
                         options.get(i),
                         (int) (optionShape.getX() + PADDING),
-                        (int) (optionShape.getY() + (DROPDOWN_HEIGHT - fontRenderer.getFontHeight()) / 2),
+                        optionTextY,
                         TEXT_COLOR.getRGB(),
                         0x55000000
                 );
@@ -228,6 +242,8 @@ public class DropdownComponent {
                 fontRenderer.resetClipBounds();
             }
         }
+
+        context.getMatrices().pop();  // Restore matrix stack
     }
 
     /**
@@ -405,6 +421,10 @@ public class DropdownComponent {
      */
     private RenderShape findModuleSectionPanel(RenderShape container) {
         // Check if this container has children that are likely to be the module section
+        if (container == null) {
+            return null;
+        }
+
         List<RenderShape> children = container.getChildren();
         if (children != null) {
             for (RenderShape child : children) {

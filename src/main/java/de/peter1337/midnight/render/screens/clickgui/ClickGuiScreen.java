@@ -9,6 +9,7 @@ import de.peter1337.midnight.render.screens.clickgui.background.ClickGuiBackgrou
 import de.peter1337.midnight.render.screens.clickgui.buttons.ClickGuiCategoryButton;
 import de.peter1337.midnight.render.screens.clickgui.buttons.ClickGuiModuleButton;
 import de.peter1337.midnight.render.screens.clickgui.setting.SettingComponent;
+import de.peter1337.midnight.render.Render2D.RenderShape;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.text.Text;
@@ -140,6 +141,8 @@ public class ClickGuiScreen extends GuiScreen {
     @Override
     public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
         if (background != null && background.getOverlay() != null) {
+            // Update shadow position before rendering to make sure it follows the panel
+            background.updateShadowPosition();
             render2D.renderShapes();
         }
     }
@@ -149,6 +152,11 @@ public class ClickGuiScreen extends GuiScreen {
 
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
+        // Update shadow position at the beginning of each render frame
+        if (background != null) {
+            background.updateShadowPosition();
+        }
+
         currentCategoryScroll += (targetCategoryScroll - currentCategoryScroll) * SCROLL_ANIMATION_SPEED;
         currentModuleScroll += (targetModuleScroll - currentModuleScroll) * SCROLL_ANIMATION_SPEED;
 
@@ -235,6 +243,11 @@ public class ClickGuiScreen extends GuiScreen {
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
+        // Update shadow position during dragging to ensure it follows in real-time
+        if (background != null) {
+            background.updateShadowPosition();
+        }
+
         if (selectedCategory != null) {
             for (ClickGuiModuleButton moduleButton : moduleButtons.get(selectedCategory)) {
                 for (SettingComponent setting : moduleButton.getSettingComponents()) {

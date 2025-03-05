@@ -153,12 +153,16 @@ public class SettingComponent {
             );
         }
 
+        // Calculate exact vertical center for the text
+        int fontHeight = fontRenderer.getFontHeight();
+        int textY = (int) (background.getY() + (HEIGHT - fontHeight) / 4f);
+
         // Render the setting name with all clipping regions applied
         fontRenderer.drawStringWithShadow(
                 context.getMatrices(),
                 setting.getName(),
                 (int) (background.getX() + PADDING),
-                (int) (background.getY() + (HEIGHT - fontRenderer.getFontHeight()) / 2),
+                textY,
                 0xFFFFFFFF,
                 0x55000000
         );

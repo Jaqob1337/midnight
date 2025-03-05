@@ -29,6 +29,8 @@ public class ClickGuiCategoryButton {
     private static final float BUTTON_WIDTH = 50f;
     public static final float BUTTON_HEIGHT = 50f;
     private static final float BUTTON_RADIUS = 5f;
+    // Adjust left margin for category buttons
+    private static final float LEFT_MARGIN = 16f; // Reduced from the default to move buttons left
     private static final Color BUTTON_COLOR = new Color(40, 40, 60, 255);
     private static final Color BUTTON_HOVER_COLOR = new Color(50, 50, 70, 255);
     private static final Color BUTTON_SELECTED_COLOR = new Color(60, 60, 80, 255);
@@ -74,8 +76,10 @@ public class ClickGuiCategoryButton {
         float maxScale = Math.min(scaleX, scaleY);
         this.iconScale = maxScale * relativeScale;
 
+        // Create the button with the adjusted left margin
         button = render2D.createRoundedRect(0, 0, BUTTON_WIDTH, BUTTON_HEIGHT, BUTTON_RADIUS, BUTTON_COLOR);
-        button.attachTo(parent, offsetX, buttonLine);
+        // Use the LEFT_MARGIN constant to position the button more to the left
+        button.attachTo(parent, LEFT_MARGIN, buttonLine);
         // For category buttons, use only the main panel clip (old behavior).
         button.setUseCombinedClip(false);
     }
@@ -129,14 +133,16 @@ public class ClickGuiCategoryButton {
     public void updatePosition(float scrollOffset) {
         if (button != null && button.getParent() != null) {
             currentY = initialY - scrollOffset;
-            button.attachTo(button.getParent(), button.getX() - button.getParent().getX(), currentY);
+            // Maintain the LEFT_MARGIN for X position when updating position
+            button.attachTo(button.getParent(), LEFT_MARGIN, currentY);
         }
     }
 
     public void resetPosition() {
         if (button != null && button.getParent() != null) {
             currentY = initialY;
-            button.attachTo(button.getParent(), button.getX() - button.getParent().getX(), initialY);
+            // Maintain the LEFT_MARGIN for X position when resetting position
+            button.attachTo(button.getParent(), LEFT_MARGIN, initialY);
         }
     }
 

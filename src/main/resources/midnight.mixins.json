@@ -6,7 +6,11 @@
 		"ChatMixin",
 		"EntityGlowingMixin",
 		"ChatScreenAccessor",
-		"TitleScreenMixin"
+		"TitleScreenMixin",
+		"ToastMixin",
+		"AdvancementMixin",
+		"SystemMessageMixin",
+		"StatusEffectHudMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

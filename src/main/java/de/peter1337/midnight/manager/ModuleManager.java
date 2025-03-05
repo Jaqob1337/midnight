@@ -5,6 +5,7 @@ import de.peter1337.midnight.modules.movement.Sprint;
 import de.peter1337.midnight.modules.player.Stealer;
 import de.peter1337.midnight.modules.render.ClickGuiModule;
 import de.peter1337.midnight.modules.render.ESP;
+import de.peter1337.midnight.modules.misc.NotificationBlocker;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.util.math.MatrixStack;
@@ -18,6 +19,7 @@ public class ModuleManager {
         registerModule(new ESP());
         registerModule(new ClickGuiModule());
         registerModule(new Stealer());
+        registerModule(new NotificationBlocker());
     }
 
     private static void registerModule(Module module) {

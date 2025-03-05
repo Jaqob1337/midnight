@@ -5,9 +5,10 @@ import de.peter1337.midnight.render.Render2D.RenderShape;
 import java.awt.Color;
 
 public class ClickGuiBackground {
+    private final RenderShape overlay;
+    private final RenderShape shadow;
     private final RenderShape background;
     private final RenderShape moduleSection;
-    private final RenderShape overlay;
 
     private static final float PANEL_WIDTH = 380f;
     private static final float PANEL_HEIGHT = 200f;
@@ -17,31 +18,52 @@ public class ClickGuiBackground {
     private static final float MODULE_SECTION_TOP_MARGIN = 10f;
     private static final float MODULE_SECTION_RADIUS = 15f;
 
+    // Shadow settings
+
+    private static final float SHADOW_EXPAND = 0.9f;
+
     // Colors
     private static final Color PANEL_COLOR = new Color(25, 25, 45, 255);
     private static final Color MODULE_SECTION_COLOR = new Color(30, 30, 50, 255);
     private static final Color OVERLAY_COLOR = new Color(0, 0, 0, 120);
+    private static final Color SHADOW_COLOR = new Color(25, 25, 45, 255);
 
     public ClickGuiBackground(Render2D render2D, float screenWidth, float screenHeight) {
-        // Create full-screen overlay first (it will render behind the panel)
-        overlay = render2D.createRoundedRect(
-                0, 0, screenWidth, screenHeight, 0, OVERLAY_COLOR
-        );
-        // Ensure overlay is drawn in full.
-        overlay.setUseCombinedClip(false);
-
-        // Create main panel
+        // Calculate panel position
         float panelX = (screenWidth - PANEL_WIDTH) / 2f;
         float panelY = (screenHeight - PANEL_HEIGHT) / 2f;
 
+        // Create full-screen overlay first
+        overlay = render2D.createRoundedRect(
+                0, 0, screenWidth, screenHeight, 0, OVERLAY_COLOR
+        );
+        overlay.setUseCombinedClip(false);
+
+        // Create the shadow shape with identical properties except size and color
+        shadow = render2D.createRoundedRect(
+                panelX - SHADOW_EXPAND/2,
+                panelY - SHADOW_EXPAND/2,
+                PANEL_WIDTH + SHADOW_EXPAND,
+                PANEL_HEIGHT + SHADOW_EXPAND,
+                PANEL_RADIUS,
+                SHADOW_COLOR
+        );
+        shadow.setUseCombinedClip(false);
+        render2D.markAsShadow(shadow);
+
+        // Create main panel by "cloning" the module section's creation style
         background = render2D.createRoundedRect(
-                panelX, panelY, PANEL_WIDTH, PANEL_HEIGHT, PANEL_RADIUS, PANEL_COLOR
+                panelX,
+                panelY,
+                PANEL_WIDTH,
+                PANEL_HEIGHT,
+                PANEL_RADIUS,
+                PANEL_COLOR
         );
         background.setDraggable(true);
-        // Main panel should render fully (old behavior), so disable combined clipping.
         background.setUseCombinedClip(false);
 
-        // Create module section background that extends to the right edge
+        // Create module section
         float moduleSectionX = panelX + PANEL_WIDTH * 0.3f + MODULE_SECTION_MARGIN;
         float moduleSectionWidth = PANEL_WIDTH * 0.7f - MODULE_SECTION_MARGIN - MODULE_SECTION_RIGHT_MARGIN;
         float moduleSectionHeight = PANEL_HEIGHT - (MODULE_SECTION_TOP_MARGIN * 2);
@@ -54,10 +76,21 @@ public class ClickGuiBackground {
                 MODULE_SECTION_RADIUS,
                 MODULE_SECTION_COLOR
         );
-        // Attach module section to the main panel.
+
+        // Important: attach the module section first, then the background will inherit its properties
         moduleSection.attachTo(background, PANEL_WIDTH * 0.3f + MODULE_SECTION_MARGIN, MODULE_SECTION_TOP_MARGIN);
-        // Module section background is drawn in full.
         moduleSection.setUseCombinedClip(false);
+    }
+
+    /**
+     * Updates the shadow position to match the current background position.
+     * Call this method before rendering shapes.
+     */
+    public void updateShadowPosition() {
+        shadow.setPosition(
+                background.getX() - SHADOW_EXPAND/2,
+                background.getY() - SHADOW_EXPAND/2
+        );
     }
 
     public RenderShape getBackground() {
@@ -70,5 +103,9 @@ public class ClickGuiBackground {
 
     public RenderShape getOverlay() {
         return overlay;
+    }
+
+    public RenderShape getShadow() {
+        return shadow;
     }
 }

@@ -7,6 +7,7 @@ import de.peter1337.midnight.modules.Setting;
 import net.minecraft.client.gui.DrawContext;
 
 import java.awt.Color;
+import java.util.List;
 
 public class SliderComponent {
     private final Render2D render2D;
@@ -19,6 +20,8 @@ public class SliderComponent {
     public static final float SLIDER_HEIGHT = 8f;
     public static final float KNOB_SIZE = 9f;
     private static final float PADDING = 5f;
+    private static final float VALUE_TEXT_PADDING = 2f;
+    private static final float VALUE_TEXT_MIN_WIDTH = 40f;
 
     // Colors.
     private static final Color TRACK_BACKGROUND_COLOR = new Color(45, 45, 65, 255);
@@ -174,12 +177,107 @@ public class SliderComponent {
             sliderKnob.setFillColor(KNOB_COLOR);
         }
 
+        // Calculate the actual value to display
         float actualValue = minValue + currentValue * (maxValue - minValue);
         String valueText = String.format("%.2f", actualValue);
-        int textX = (int) (sliderTrack.getX() + sliderWidth + 2);
-        int textY = (int) (sliderTrack.getY() + (SLIDER_HEIGHT - fontRenderer.getFontHeight()) / 2);
-        int padding = 2;
-        fontRenderer.drawStringWithShadow(context.getMatrices(), valueText, textX + padding, textY, VALUE_TEXT_COLOR.getRGB(), 0x55000000);
+
+        // Get font dimensions
+        int fontHeight = fontRenderer.getFontHeight();
+        int textWidth = fontRenderer.getStringWidth(valueText);
+
+        // Calculate text position, adding padding to avoid the text touching the slider
+        int textX = (int) (sliderTrack.getX() + sliderWidth + VALUE_TEXT_PADDING);
+
+        // Calculate vertical center for proper alignment - align with the center of the track
+        int textY = (int) (sliderTrack.getY() + SLIDER_HEIGHT / 4.0f - fontHeight / 2.0f);
+
+        // Find the top-level container (main panel) for clipping
+        RenderShape mainPanel = sliderTrack;
+        while (mainPanel.getParent() != null) {
+            mainPanel = mainPanel.getParent();
+        }
+
+        // Find the module section panel if available
+        RenderShape moduleSection = findModuleSectionPanel(sliderTrack);
+
+        // Set up clipping to ensure the value text is visible
+        // Define a clip area for the value text that's wider than the text itself
+        float valueTextWidth = fontRenderer.getStringWidth(valueText) + VALUE_TEXT_PADDING * 2;
+        fontRenderer.setClipBounds(
+                textX - VALUE_TEXT_PADDING,
+                sliderTrack.getY(),
+                valueTextWidth,
+                SLIDER_HEIGHT
+        );
+
+        // Add additional clip regions for both the main panel and module section
+        fontRenderer.clearAdditionalClipRegions();
+        if (mainPanel != null) {
+            fontRenderer.addClipRegion(
+                    mainPanel.getX(),
+                    mainPanel.getY(),
+                    mainPanel.getWidth(),
+                    mainPanel.getHeight()
+            );
+        }
+
+        // If we found a module section panel, add it as an additional clip region
+        if (moduleSection != null) {
+            fontRenderer.addClipRegion(
+                    moduleSection.getX(),
+                    moduleSection.getY(),
+                    moduleSection.getWidth(),
+                    moduleSection.getHeight()
+            );
+        }
+
+        // Draw the value text with proper shadow
+        fontRenderer.drawStringWithShadow(
+                context.getMatrices(),
+                valueText,
+                textX,
+                textY,
+                VALUE_TEXT_COLOR.getRGB(),
+                0x55000000
+        );
+
+        // Reset any clipping
+        fontRenderer.resetClipBounds();
+    }
+
+    /**
+     * Tries to find the module section panel in the container hierarchy.
+     * This is a heuristic that looks for shapes that might be the module section panel.
+     *
+     * @param container The container to start searching from
+     * @return The module section panel, or null if not found
+     */
+    private RenderShape findModuleSectionPanel(RenderShape container) {
+        if (container == null) {
+            return null;
+        }
+
+        // Check if this container has children that are likely to be the module section
+        List<RenderShape> children = container.getChildren();
+        if (children != null) {
+            for (RenderShape child : children) {
+                // In ClickGuiBackground, the module section is the second shape created
+                // and has specific dimensions. This is a heuristic to find it.
+                if (child.getWidth() > container.getWidth() * 0.6f &&
+                        child.getHeight() > container.getHeight() * 0.8f) {
+                    // This looks like the module section panel
+                    return child;
+                }
+            }
+        }
+
+        // If we didn't find it at this level, check the parent
+        if (container.getParent() != null) {
+            return findModuleSectionPanel(container.getParent());
+        }
+
+        // If we get here, we couldn't find it
+        return null;
     }
 
     public void updatePosition(RenderShape background, float sliderX, float sliderY) {

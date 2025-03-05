@@ -18,6 +18,17 @@ import java.util.Collections;
 public class Stealer extends Module {
     private final MinecraftClient mc = MinecraftClient.getInstance();
 
+    public Stealer() {
+        super("Stealer", "Automatically takes items from containers", Category.PLAYER, "x");
+
+        // Default whitelist/blacklist items (you can add these in the constructor)
+        // For example, prioritize valuable items
+        itemFilter.add(Items.DIAMOND);
+        itemFilter.add(Items.NETHERITE_INGOT);
+        itemFilter.add(Items.ENCHANTED_GOLDEN_APPLE);
+        // Add more default items as needed
+    }
+
     private final Setting<String> mode = register(
             new Setting<>("Mode", "All", Arrays.asList("All", "Whitelist", "Blacklist"), "Item selection mode")
     );
@@ -66,16 +77,7 @@ public class Stealer extends Module {
     // Keeps track of how many consecutive items we've taken to avoid constant patterns
     private int consecutiveItemsTaken = 0;
 
-    public Stealer() {
-        super("Stealer", "Automatically takes items from containers", Category.PLAYER, "c");
 
-        // Default whitelist/blacklist items (you can add these in the constructor)
-        // For example, prioritize valuable items
-        itemFilter.add(Items.DIAMOND);
-        itemFilter.add(Items.NETHERITE_INGOT);
-        itemFilter.add(Items.ENCHANTED_GOLDEN_APPLE);
-        // Add more default items as needed
-    }
 
     @Override
     public void onEnable() {

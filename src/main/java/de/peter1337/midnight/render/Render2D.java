@@ -15,6 +15,9 @@ public class Render2D {
     // Secondary clipping shape (e.g. module section)
     private RenderShape moduleClipBounds;
 
+    // Special shape reference for shadow identification
+    private RenderShape shadowShape = null;
+
     public Render2D() {
         this.shaderManager = new ShaderManager();
         this.shapes = new ArrayList<>();
@@ -36,6 +39,13 @@ public class Render2D {
 
     public void setModuleClip(RenderShape moduleClipBounds) {
         this.moduleClipBounds = moduleClipBounds;
+    }
+
+    /**
+     * Mark a shape as a shadow for special rendering
+     */
+    public void markAsShadow(RenderShape shape) {
+        this.shadowShape = shape;
     }
 
     // Computes and sets the combined (intersected) clipping region.
@@ -72,9 +82,36 @@ public class Render2D {
         return shape;
     }
 
-    // Render each shape using either the combined clip (if useCombinedClip is true) or only the main clip.
+    /**
+     * Render each shape using specialized rendering order and clipping for shadows.
+     */
     public void renderShapes() {
+        // PHASE 1: Render shadow first, if it exists, without any clipping
+        if (shadowShape != null) {
+            // Reset all clipping to ensure shadow renders in full
+            shaderManager.resetClipBounds();
+
+            // Draw the shadow shape
+            shaderManager.drawShape(
+                    shadowShape.getX(),
+                    shadowShape.getY(),
+                    shadowShape.getWidth(),
+                    shadowShape.getHeight(),
+                    shadowShape.getRadius(),
+                    shadowShape.getSmoothing(),
+                    shadowShape.getFillColor(),
+                    shadowShape.getOutlineColor(),
+                    shadowShape.getOutlineWidth()
+            );
+        }
+
+        // PHASE 2: Render all other shapes with normal clipping
         for (RenderShape shape : shapes) {
+            // Skip the shadow shape as we already rendered it
+            if (shape == shadowShape) {
+                continue;
+            }
+
             if (shape.isUseCombinedClip()) {
                 if (clipBounds != null && moduleClipBounds != null) {
                     setCombinedClipBounds(clipBounds, moduleClipBounds);
@@ -103,6 +140,7 @@ public class Render2D {
                     shaderManager.resetClipBounds();
                 }
             }
+
             shaderManager.drawShape(
                     shape.getX(),
                     shape.getY(),
@@ -115,6 +153,8 @@ public class Render2D {
                     shape.getOutlineWidth()
             );
         }
+
+        // Reset clipping state at the end
         shaderManager.resetClipBounds();
     }
 

@@ -4,6 +4,7 @@ import de.peter1337.midnight.Midnight;
 import de.peter1337.midnight.manager.BindManager;
 import de.peter1337.midnight.manager.ModuleManager;
 import de.peter1337.midnight.manager.ConfigManager; // Import the new config manager
+import de.peter1337.midnight.manager.ModuleVisibilityManager;
 import de.peter1337.midnight.modules.Module;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.minecraft.client.MinecraftClient;
@@ -96,13 +97,55 @@ public class CommandManager {
             } else {
                 sendMessage("Unknown config command: " + subCommand);
             }
+        } else if (args[0].equalsIgnoreCase("visible") || args[0].equalsIgnoreCase("visibility")) {
+            if (args.length < 2) {
+                sendMessage("Usage: .visible <module> - Toggles a module's visibility in the HUD");
+                return;
+            }
+            String moduleName = args[1];
+            Module module = ModuleManager.getModule(moduleName);
+            if (module == null) {
+                sendMessage("Module not found: " + moduleName);
+                return;
+            }
+            boolean isVisible = ModuleVisibilityManager.toggleVisibility(module);
+            sendMessage(module.getName() + " is now " + (isVisible ? "visible" : "hidden") + " in the HUD");
+        } else if (args[0].equalsIgnoreCase("hide")) {
+            if (args.length < 2) {
+                sendMessage("Usage: .hide <module> - Hides a module from the HUD");
+                return;
+            }
+            String moduleName = args[1];
+            Module module = ModuleManager.getModule(moduleName);
+            if (module == null) {
+                sendMessage("Module not found: " + moduleName);
+                return;
+            }
+            ModuleVisibilityManager.hideModule(module.getClass());
+            sendMessage("Hidden " + module.getName() + " from the HUD");
+        } else if (args[0].equalsIgnoreCase("show")) {
+            if (args.length < 2) {
+                sendMessage("Usage: .show <module> - Shows a module in the HUD");
+                return;
+            }
+            String moduleName = args[1];
+            Module module = ModuleManager.getModule(moduleName);
+            if (module == null) {
+                sendMessage("Module not found: " + moduleName);
+                return;
+            }
+            ModuleVisibilityManager.showModule(module.getClass());
+            sendMessage("Showing " + module.getName() + " in the HUD");
         } else if (args[0].equalsIgnoreCase("help")) {
             // Display all available commands.
             sendMessage("Available commands:");
-            sendMessage(" - .bind <module> <key>         : Bind a key to a module");
-            sendMessage(" - .list                       : List all modules");
-            sendMessage(" - .toggle <module>            : Toggle a module on/off");
-            sendMessage(" - .config <save/load> <name>  : Save or load a config");
+            sendMessage(" - .bind <module> <key>       : Bind a key to a module");
+            sendMessage(" - .list                     : List all modules");
+            sendMessage(" - .toggle <module>          : Toggle a module on/off");
+            sendMessage(" - .config <save/load> <name>: Save or load a config");
+            sendMessage(" - .visible <module>         : Toggle module visibility in HUD");
+            sendMessage(" - .hide <module>            : Hide module from HUD");
+            sendMessage(" - .show <module>            : Show module in HUD");
         }
     }
 

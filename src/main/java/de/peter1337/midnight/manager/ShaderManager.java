@@ -217,31 +217,54 @@ public class ShaderManager {
             int screenHeight = MinecraftClient.getInstance().getWindow().getScaledHeight();
             float convertedY = screenHeight - y - height;
 
+            // Adjust smoothing based on size and radius
+            float adjustedSmoothing = smoothing;
+            if (width > 300 || height > 150) {
+                // Increase smoothing for larger shapes to improve anti-aliasing
+                adjustedSmoothing = Math.max(smoothing, 1.5f);
+            }
+
+            // For shapes with large radius, increase smoothing further
+            if (radius > 10) {
+                adjustedSmoothing = Math.max(adjustedSmoothing, radius / 8);
+            }
+
             // Set uniforms using cached locations
             if (resolutionLocation != -1) GL20.glUniform2f(resolutionLocation, width, height);
             if (rectLocation != -1) GL20.glUniform4f(rectLocation, x, convertedY, width, height);
             if (radiusLocation != -1) GL20.glUniform1f(radiusLocation, radius);
-            if (smoothingLocation != -1) GL20.glUniform1f(smoothingLocation, smoothing);
+            if (smoothingLocation != -1) GL20.glUniform1f(smoothingLocation, adjustedSmoothing);
+
             if (colorLocation != -1) {
+                // Ensure alpha is never exactly 100% for better anti-aliasing
+                float alpha = fillColor.getAlpha() / 255f;
+                if (alpha > 0.99f) alpha = 0.99f;
+
                 GL20.glUniform4f(colorLocation,
                         fillColor.getRed() / 255f,
                         fillColor.getGreen() / 255f,
                         fillColor.getBlue() / 255f,
-                        fillColor.getAlpha() / 255f
+                        alpha
                 );
             }
+
             if (outlineColor != null && outlineColorLocation != -1) {
+                // Also apply alpha adjustment to outline
+                float outlineAlpha = outlineColor.getAlpha() / 255f;
+                if (outlineAlpha > 0.99f) outlineAlpha = 0.99f;
+
                 GL20.glUniform4f(outlineColorLocation,
                         outlineColor.getRed() / 255f,
                         outlineColor.getGreen() / 255f,
                         outlineColor.getBlue() / 255f,
-                        outlineColor.getAlpha() / 255f
+                        outlineAlpha
                 );
                 if (outlineWidthLocation != -1) GL20.glUniform1f(outlineWidthLocation, outlineWidth);
             } else if (outlineColorLocation != -1) {
                 GL20.glUniform4f(outlineColorLocation, 0f, 0f, 0f, 0f);
                 if (outlineWidthLocation != -1) GL20.glUniform1f(outlineWidthLocation, 0f);
             }
+
             if (guiScaleLocation != -1) GL20.glUniform1f(guiScaleLocation, guiScale);
             if (transformLocation != -1) {
                 Matrix4f transform = new Matrix4f().identity();
