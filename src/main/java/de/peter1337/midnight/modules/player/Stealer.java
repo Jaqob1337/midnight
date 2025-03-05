@@ -21,28 +21,22 @@ public class Stealer extends Module {
     public Stealer() {
         super("Stealer", "Automatically takes items from containers", Category.PLAYER, "x");
 
-        // Default whitelist/blacklist items (you can add these in the constructor)
-        // For example, prioritize valuable items
+        // Default whitelist/blacklist items
         itemFilter.add(Items.DIAMOND);
         itemFilter.add(Items.NETHERITE_INGOT);
         itemFilter.add(Items.ENCHANTED_GOLDEN_APPLE);
-        // Add more default items as needed
     }
 
     private final Setting<String> mode = register(
             new Setting<>("Mode", "All", Arrays.asList("All", "Whitelist", "Blacklist"), "Item selection mode")
     );
 
-    private final Setting<Float> minDelay = register(
-            new Setting<>("MinDelay", 0.1f, 0.0f, 1.0f, "Minimum delay between taking items (in seconds)")
-    );
-
-    private final Setting<Float> maxDelay = register(
-            new Setting<>("MaxDelay", 0.25f, 0.0f, 2.0f, "Maximum delay between taking items (in seconds)")
+    private final Setting<Float> delay = register(
+            new Setting<>("Delay", 0.2f, 0.0f, 1.0f, "Delay between taking items (in seconds)")
     );
 
     private final Setting<Boolean> randomDelay = register(
-            new Setting<>("RandomDelay", Boolean.TRUE, "Use random delays between min and max")
+            new Setting<>("RandomDelay", Boolean.TRUE, "Add slight variation to delay")
     );
 
     private final Setting<Boolean> autoClose = register(
@@ -51,6 +45,7 @@ public class Stealer extends Module {
 
     private final Setting<Float> closeDelay = register(
             new Setting<>("CloseDelay", 0.2f, 0.0f, 2.0f, "Delay before closing container (in seconds)")
+                    .dependsOn(autoClose)
     );
 
     private final Setting<Boolean> humanPatterns = register(
@@ -59,10 +54,6 @@ public class Stealer extends Module {
 
     private final Setting<Boolean> smartStealer = register(
             new Setting<>("SmartStealer", Boolean.TRUE, "Takes items only if you have space for them")
-    );
-
-    private final Setting<Boolean> toggleOnFinish = register(
-            new Setting<>("ToggleOnFinish", Boolean.FALSE, "Disable the module after stealer finishes")
     );
 
     // Add a list for whitelisted/blacklisted items
@@ -76,8 +67,6 @@ public class Stealer extends Module {
 
     // Keeps track of how many consecutive items we've taken to avoid constant patterns
     private int consecutiveItemsTaken = 0;
-
-
 
     @Override
     public void onEnable() {
@@ -108,7 +97,6 @@ public class Stealer extends Module {
                 containerOpenTime = System.currentTimeMillis();
 
                 // Add a small initial delay before stealing to appear more natural
-                // Most anticheats flag instant stealing as soon as container opens
                 if (humanPatterns.getValue() && Math.random() < 0.8) {
                     // Wait 100-300ms before starting to steal
                     lastStealTime = System.currentTimeMillis() + (long)(Math.random() * 200) + 100;
@@ -127,16 +115,16 @@ public class Stealer extends Module {
         GenericContainerScreenHandler handler = (GenericContainerScreenHandler) mc.player.currentScreenHandler;
         ClientPlayerEntity player = mc.player;
 
-        // Delay mechanism with randomization to bypass pattern detection
+        // Delay mechanism with slight randomization
         long currentTime = System.currentTimeMillis();
         float actualDelay;
 
         if (randomDelay.getValue()) {
-            // Random delay between min and max
-            float range = maxDelay.getValue() - minDelay.getValue();
-            actualDelay = minDelay.getValue() + (float) Math.random() * range;
+            // Add slight variation (±10% of the base delay)
+            float variation = delay.getValue() * 0.1f;
+            actualDelay = delay.getValue() + (float)(Math.random() * variation * 2 - variation);
         } else {
-            actualDelay = minDelay.getValue();
+            actualDelay = delay.getValue();
         }
 
         if (currentTime - lastStealTime < actualDelay * 1000) {
@@ -150,7 +138,6 @@ public class Stealer extends Module {
         int containerSize = handler.getRows() * 9;
 
         // Occasionally skip items or change the order to appear more human-like
-        // This helps bypass pattern detection in anticheats
         List<Integer> slotOrder = new ArrayList<>();
         for (int i = 0; i < containerSize; i++) {
             slotOrder.add(i);
@@ -163,7 +150,6 @@ public class Stealer extends Module {
 
         // Sometimes start from where we left off
         if (lastSlotIndex >= 0 && lastSlotIndex < containerSize && Math.random() < 0.5) {
-            // Reorder so we start from lastSlotIndex
             List<Integer> reordered = new ArrayList<>();
             for (int i = lastSlotIndex; i < containerSize; i++) {
                 reordered.add(i);
@@ -199,7 +185,6 @@ public class Stealer extends Module {
             // Perform the quick move (shift-click) with bypass techniques
             if (humanPatterns.getValue()) {
                 // Sometimes hover over the item briefly before taking it
-                // This mimics human behavior better than instant clicks
                 if (Math.random() < 0.3) {
                     // Simulate a cursor hover by adding a small pause
                     try {
@@ -210,7 +195,6 @@ public class Stealer extends Module {
                 }
 
                 // Occasionally use regular click + shift-click instead of just shift-click
-                // This creates patterns that are less detectable by anticheats
                 if (Math.random() < 0.15) {
                     // First click normally
                     mc.interactionManager.clickSlot(
@@ -279,10 +263,6 @@ public class Stealer extends Module {
                         if (mc.player != null && mc.player.currentScreenHandler == handler) {
                             mc.execute(() -> {
                                 mc.player.closeHandledScreen();
-
-                                if (toggleOnFinish.getValue()) {
-                                    this.toggle();  // Disable the module
-                                }
                             });
                         }
                     } catch (InterruptedException e) {
@@ -292,10 +272,6 @@ public class Stealer extends Module {
             } else {
                 // Close immediately if delay is 0
                 mc.player.closeHandledScreen();
-
-                if (toggleOnFinish.getValue()) {
-                    this.toggle();  // Disable the module
-                }
             }
         }
     }

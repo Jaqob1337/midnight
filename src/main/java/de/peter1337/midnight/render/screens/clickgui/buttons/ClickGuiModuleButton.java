@@ -22,7 +22,7 @@ public class ClickGuiModuleButton {
 
     // Layout constants.
     private static final float BUTTON_WIDTH = 230f;
-    private static final float BUTTON_HEIGHT = 30f;
+    public static final float BUTTON_HEIGHT = 30f;
     private static final float BUTTON_RADIUS = 3f;
     private static final Color BUTTON_COLOR = new Color(40, 35, 55, 255);
     private static final Color BUTTON_ENABLED_COLOR = new Color(45, 45, 65, 255);
@@ -48,7 +48,6 @@ public class ClickGuiModuleButton {
         initializeSettings(render2D);
     }
 
-
     private void initializeSettings(Render2D render2D) {
         float yOffset = BUTTON_HEIGHT + SETTINGS_PADDING;
         for (Setting<?> setting : module.getSettings()) {
@@ -59,19 +58,30 @@ public class ClickGuiModuleButton {
     }
 
     /**
-     * Updates the button’s fill color.
+     * Updates the button's fill color.
      */
     public void update() {
         if (button != null) {
             button.setFillColor(visible ? (module.isEnabled() ? BUTTON_ENABLED_COLOR : BUTTON_COLOR) : TRANSPARENT);
         }
+
+        // Update dependency visibility for all settings
+        updateDependencies();
     }
 
+    /**
+     * Updates the visibility of all settings based on their dependencies.
+     * This is called whenever a setting value changes that might affect dependencies.
+     */
+    public void updateDependencies() {
+        for (SettingComponent settingComponent : settingComponents) {
+            settingComponent.updateDependencyVisibility();
+        }
+    }
 
     /**
      * Renders the module button and its settings (if expanded).
      */
-
     public void render(DrawContext context) {
         if (!visible) return;
 
@@ -173,7 +183,7 @@ public class ClickGuiModuleButton {
     }
 
     /**
-     * Called by the parent container to update this module button’s absolute position.
+     * Called by the parent container to update this module button's absolute position.
      *
      * @param yOffset the absolute y coordinate for this button.
      */
@@ -186,9 +196,17 @@ public class ClickGuiModuleButton {
             // If expanded, update the relative position of the setting components.
             if (expanded) {
                 float settingYOffset = BUTTON_HEIGHT + SETTINGS_PADDING;
-                for (SettingComponent setting : settingComponents) {
-                    setting.updatePosition(settingYOffset);
-                    settingYOffset += setting.getHeight() + SETTINGS_PADDING;
+                for (int i = 0; i < settingComponents.size(); i++) {
+                    SettingComponent setting = settingComponents.get(i);
+
+                    // Skip positioning if the setting is not visible due to dependencies
+                    if (setting.isDependencyVisible()) {
+                        setting.updatePosition(settingYOffset);
+                        settingYOffset += setting.getTotalHeight() + SETTINGS_PADDING;
+                    } else {
+                        // Place it at the same position as previous setting to hide it
+                        setting.updatePosition(settingYOffset);
+                    }
                 }
             }
         }
@@ -201,6 +219,8 @@ public class ClickGuiModuleButton {
         if (!visible) return;
         if (mouseButton == 0) {
             module.toggle();
+            // After toggling a module, update dependencies as this might affect setting visibility
+            updateDependencies();
         } else if (mouseButton == 1) {
             // Toggle the expanded state.
             setExpanded(!expanded);
@@ -211,6 +231,9 @@ public class ClickGuiModuleButton {
         for (SettingComponent setting : settingComponents) {
             setting.setVisible(expanded);
         }
+
+        // Also update dependencies when expanding/collapsing
+        updateDependencies();
     }
 
     /**
@@ -221,8 +244,10 @@ public class ClickGuiModuleButton {
 
         float total = BUTTON_HEIGHT;
         for (SettingComponent setting : settingComponents) {
-            // Use the setting's total height which includes any dropdown options
-            total += setting.getTotalHeight() + SETTINGS_PADDING;
+            // Only include visible settings in the total height calculation
+            if (setting.isDependencyVisible()) {
+                total += setting.getTotalHeight() + SETTINGS_PADDING;
+            }
         }
         return total;
     }

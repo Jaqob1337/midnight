@@ -5,60 +5,61 @@ import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.modules.Category;
 import de.peter1337.midnight.modules.Setting;
 import net.minecraft.client.MinecraftClient;
-
-import java.util.Arrays;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.entity.mob.MobEntity;
+import net.minecraft.entity.passive.AnimalEntity;
 
 public class ESP extends Module {
     private final MinecraftClient mc = MinecraftClient.getInstance();
     private boolean active = false;
 
-    public ESP() {
-        super("ESP", "Zeigt Entity-Hitboxes mittels Glow", Category.RENDER, "j");
-    }
-    // Setting that prevents resetting module button positions when enabled.
-    private final Setting<Boolean> disableResetPosition = register(
-            new Setting<>("DisableResetPosition", Boolean.FALSE, "Prevents module button positions from resetting when opening the ClickGUI")
+    // Settings for different entity types
+    private final Setting<Boolean> glowPlayers = register(
+            new Setting<>("Players", Boolean.TRUE, "Glow effect for player entities")
     );
 
-    private final Setting<String> sprintMode = register(
-            new Setting<>("SprintMode", "Default", Arrays.asList("Default", "Hold", "Toggle", "Toggle2", "Toggle4"), "Select sprint mode")
+    private final Setting<Boolean> glowHostileMobs = register(
+            new Setting<>("Mobs", Boolean.FALSE, "Glow effect for hostile mobs")
     );
+
+    private final Setting<Boolean> glowPassiveMobs = register(
+            new Setting<>("Animals", Boolean.FALSE, "Glow effect for passive animals")
+    );
+
+    // New method to check if a specific entity should glow
+    public boolean shouldEntityGlow(Entity entity) {
+        // Always skip the local player
+        if (entity == mc.player) {
+            return false;
+        }
+
+        // Check entity type against settings
+        return (glowPlayers.getValue() && entity instanceof PlayerEntity) ||
+                (glowHostileMobs.getValue() && entity instanceof MobEntity && !(entity instanceof AnimalEntity)) ||
+                (glowPassiveMobs.getValue() && entity instanceof AnimalEntity);
+    }
+
+    public ESP() {
+        super("ESP", "Zeigt Entity-Hitboxes mittels selektiven Glow", Category.RENDER, "j");
+    }
 
     @Override
     public void onEnable() {
         active = true;
-        updateGlow(true);
         Midnight.LOGGER.info("ESP on");
     }
 
     @Override
     public void onDisable() {
         active = false;
-        updateGlow(false);
         Midnight.LOGGER.info("ESP off");
     }
 
     @Override
     public void onUpdate() {
-        if (mc.world != null) {
-            mc.world.getEntities().forEach(entity -> {
-                if (entity != mc.player) {
-                    // Setze den Glow immer entsprechend dem aktuellen ESP-Zustand
-                    entity.setGlowing(active);
-                }
-            });
-        }
-    }
-
-    private void updateGlow(boolean glow) {
-        if (mc.world == null) {
-            return;
-        }
-        mc.world.getEntities().forEach(entity -> {
-            if (entity != mc.player) {
-                entity.setGlowing(glow);
-            }
-        });
+        // This method is now mostly a placeholder
+        // The actual glowing is controlled by the EntityGlowingMixin
     }
 
     @Override

@@ -7,29 +7,57 @@ import net.minecraft.client.gui.screen.ChatScreen;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import org.lwjgl.glfw.GLFW;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
 public class CommandAutoComplete {
     // Supported dot commands (without the dot)
-    private static final List<String> COMMANDS = List.of("bind", "list", "toggle");
+    private static final List<String> COMMANDS = List.of("bind", "list", "toggle", "config");
+    private static final List<String> CONFIG_COMMANDS = List.of("save", "load");
 
     // Store the current suggestions to be rendered.
     public static List<String> currentSuggestions = new ArrayList<>();
 
+    // Flag to cancel default Minecraft chat suggestions
+    public static boolean suppressDefaultSuggestions = false;
+
     // Debounce for Tab key presses (in milliseconds)
     private static long lastTabPress = 0;
 
+    // Get list of existing config files
+    private static List<String> getConfigFiles() {
+        File configDir = new File("configs");
+        List<String> configNames = new ArrayList<>();
+
+        if (configDir.exists() && configDir.isDirectory()) {
+            File[] configFiles = configDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".json"));
+            if (configFiles != null) {
+                for (File file : configFiles) {
+                    // Remove .json extension
+                    configNames.add(file.getName().substring(0, file.getName().length() - 5));
+                }
+            }
+        }
+
+        return configNames;
+    }
+
     public static void tick() {
         MinecraftClient client = MinecraftClient.getInstance();
+        suppressDefaultSuggestions = false;
+
         if (client.currentScreen instanceof ChatScreen) {
             ChatScreen chatScreen = (ChatScreen) client.currentScreen;
             // Use a mixin accessor (ChatScreenAccessor) to get the private chat text field.
             TextFieldWidget textField = ((de.peter1337.midnight.mixins.ChatScreenAccessor) chatScreen).getChatField();
             if (textField != null) {
                 String currentText = textField.getText();
-                // Only work if the chat text starts with a dot.
+                // Check if the chat text starts with a dot.
                 if (currentText.startsWith(".")) {
+                    // Suppress default Minecraft suggestions
+                    suppressDefaultSuggestions = true;
+
                     String commandText = currentText.substring(1); // Remove the dot
                     String[] parts = commandText.split(" ");
                     List<String> suggestions = new ArrayList<>();
@@ -44,16 +72,36 @@ public class CommandAutoComplete {
                                 suggestions.add(cmd);
                             }
                         }
-                    } else if (parts.length == 2 &&
-                            (parts[0].equalsIgnoreCase("bind") || parts[0].equalsIgnoreCase("toggle"))) {
-                        // Autocomplete module name for 'bind' or 'toggle'.
-                        String partialModule = parts[1];
-                        for (Module module : ModuleManager.getModules()) {
-                            if (module.getName().toLowerCase().startsWith(partialModule.toLowerCase())) {
-                                suggestions.add(module.getName());
+                    } else if (parts.length == 2) {
+                        if (parts[0].equalsIgnoreCase("bind") || parts[0].equalsIgnoreCase("toggle")) {
+                            // Autocomplete module name for 'bind' or 'toggle'.
+                            String partialModule = parts[1];
+                            for (Module module : ModuleManager.getModules()) {
+                                if (module.getName().toLowerCase().startsWith(partialModule.toLowerCase())) {
+                                    suggestions.add(module.getName());
+                                }
+                            }
+                        } else if (parts[0].equalsIgnoreCase("config")) {
+                            // Autocomplete config commands
+                            String partialConfigCmd = parts[1];
+                            for (String configCmd : CONFIG_COMMANDS) {
+                                if (configCmd.startsWith(partialConfigCmd.toLowerCase())) {
+                                    suggestions.add(configCmd);
+                                }
+                            }
+                        }
+                    } else if (parts.length == 3 &&
+                            parts[0].equalsIgnoreCase("config") &&
+                            (parts[1].equalsIgnoreCase("save") || parts[1].equalsIgnoreCase("load"))) {
+                        // Autocomplete config names for save/load
+                        String partialConfigName = parts[2];
+                        for (String configName : getConfigFiles()) {
+                            if (configName.toLowerCase().startsWith(partialConfigName.toLowerCase())) {
+                                suggestions.add(configName);
                             }
                         }
                     }
+
                     // Update the static suggestions list so it can be rendered.
                     currentSuggestions = suggestions;
 
@@ -65,6 +113,8 @@ public class CommandAutoComplete {
                                 textField.setText("." + suggestions.get(0));
                             } else if (parts.length == 2) {
                                 textField.setText("." + parts[0] + " " + suggestions.get(0));
+                            } else if (parts.length == 3) {
+                                textField.setText("." + parts[0] + " " + parts[1] + " " + suggestions.get(0));
                             }
                         }
                     }

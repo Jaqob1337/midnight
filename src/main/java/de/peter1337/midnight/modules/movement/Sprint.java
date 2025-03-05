@@ -17,9 +17,10 @@ public class Sprint extends Module {
             new Setting<>("JumpSprint", Boolean.FALSE, "Automatically jump while sprinting")
     );
 
-    // Slider setting for jump delay in seconds.
+    // Slider setting for jump delay in seconds, dependent on JumpSprint being enabled.
     private final Setting<Float> jumpDelay = register(
             new Setting<>("JumpDelay", 0.5f, 0.1f, 2.0f, "Delay (in seconds) between jumps")
+                    .dependsOn(jumpSprint) // This setting is only visible when jumpSprint is enabled
     );
 
     // Dropdown setting for sprint mode.

@@ -20,6 +20,7 @@ public class SettingComponent {
     private SliderComponent sliderComponent;    // For numeric settings
     private DropdownComponent dropdownComponent; // For dropdown (String) settings
     private boolean visible;
+    private boolean dependencyVisible; // Whether this setting should be visible based on dependencies
 
     // Layout constants.
     private static final float HEIGHT = 20f;
@@ -41,6 +42,7 @@ public class SettingComponent {
         this.setting = setting;
         this.fontRenderer = CustomFontRenderer.getInstanceForSize(10f);
         this.visible = false;
+        this.dependencyVisible = setting.isVisible(); // Initialize based on setting's visibility
 
         float textWidth = fontRenderer.getStringWidth(setting.getName());
         valueDisplayWidth = fontRenderer.getStringWidth("00.00") + VALUE_DISPLAY_PADDING * 2;
@@ -69,7 +71,6 @@ public class SettingComponent {
             float sliderX = background.getX() + sliderXOffset;
             float sliderY = background.getY() + (HEIGHT - SliderComponent.SLIDER_HEIGHT) / 2;
             sliderComponent = new SliderComponent(render2D, background, sliderX, sliderY, sliderWidth, (Setting<? extends Number>) setting);
-            setVisible(false);
         } else if (setting.getValue() instanceof String && setting.getOptions() != null) {
             // For dropdown settings, position at the right side like the toggle
             float dropdownX = background.getX() + totalWidth - DROPDOWN_WIDTH - PADDING;
@@ -86,8 +87,20 @@ public class SettingComponent {
         }
     }
 
+    /**
+     * Updates the visibility state based on dependencies
+     */
+    public void updateDependencyVisibility() {
+        dependencyVisible = setting.isVisible();
+        updateVisibility();
+    }
+
+    /**
+     * Gets the total height of this setting component, taking into account its visibility.
+     * If the setting is not visible due to dependencies, it returns 0.
+     */
     public float getTotalHeight() {
-        if (!visible) return 0;
+        if (!visible || !dependencyVisible) return 0;
 
         // Base height of the setting component
         float height = HEIGHT;
@@ -95,15 +108,14 @@ public class SettingComponent {
         // Add dropdown options height if this has an expanded dropdown
         if (dropdownComponent != null && dropdownComponent.isExpanded()) {
             // Add height for each option in the dropdown
-            height += dropdownComponent.isExpanded() ?
-                    (dropdownComponent.getOptionsCount() * DropdownComponent.DROPDOWN_HEIGHT) : 0;
+            height += dropdownComponent.getOptionsCount() * DropdownComponent.DROPDOWN_HEIGHT;
         }
 
         return height;
     }
 
     public void render(DrawContext context) {
-        if (!visible) return;
+        if (!visible || !dependencyVisible) return;
 
         // Find the top-level container (main panel)
         RenderShape mainPanel = background;
@@ -204,18 +216,22 @@ public class SettingComponent {
         }
     }
 
-    public void setVisible(boolean visible) {
-        this.visible = visible;
-        background.setFillColor(visible ? BG_COLOR : TRANSPARENT);
+    private void updateVisibility() {
+        background.setFillColor((visible && dependencyVisible) ? BG_COLOR : TRANSPARENT);
         if (toggleComponent != null) {
-            toggleComponent.setVisible(visible);
+            toggleComponent.setVisible(visible && dependencyVisible);
         }
         if (sliderComponent != null) {
-            sliderComponent.setVisible(visible);
+            sliderComponent.setVisible(visible && dependencyVisible);
         }
         if (dropdownComponent != null) {
-            dropdownComponent.setVisible(visible);
+            dropdownComponent.setVisible(visible && dependencyVisible);
         }
+    }
+
+    public void setVisible(boolean visible) {
+        this.visible = visible;
+        updateVisibility();
     }
 
     public float getHeight() {
@@ -226,7 +242,7 @@ public class SettingComponent {
      * Updated hit detection to include the extended area of an expanded dropdown.
      */
     public boolean isHovered(double mouseX, double mouseY) {
-        if (!visible) return false;
+        if (!visible || !dependencyVisible) return false;
 
         // Base hitbox for the setting (the 20f height area).
         boolean baseHovered = mouseX >= background.getX() &&
@@ -243,12 +259,12 @@ public class SettingComponent {
     }
 
     public boolean isToggleHovered(double mouseX, double mouseY) {
-        if (!visible || toggleComponent == null) return false;
+        if (!visible || !dependencyVisible || toggleComponent == null) return false;
         return toggleComponent.isHovered(mouseX, mouseY);
     }
 
     public void onClick(double mouseX, double mouseY) {
-        if (!visible) return;
+        if (!visible || !dependencyVisible) return;
         if (toggleComponent != null && setting.getValue() instanceof Boolean && isToggleHovered(mouseX, mouseY)) {
             boolean currentValue = (Boolean) setting.getValue();
             setting.setValue(!currentValue);
@@ -261,6 +277,7 @@ public class SettingComponent {
     }
 
     public void onMouseDrag(double mouseX, double mouseY) {
+        if (!visible || !dependencyVisible) return;
         if (sliderComponent != null && setting.getValue() instanceof Number) {
             sliderComponent.onDrag(mouseX);
         }
@@ -268,10 +285,25 @@ public class SettingComponent {
     }
 
     public void onMouseUp(double mouseX, double mouseY) {
+        if (!visible || !dependencyVisible) return;
         if (sliderComponent != null && setting.getValue() instanceof Number) {
             sliderComponent.onMouseUp(mouseX, mouseY);
         }
         // Dropdowns typically do not require a mouse up handler.
+    }
+
+    /**
+     * Returns the setting associated with this component.
+     */
+    public Setting<?> getSetting() {
+        return setting;
+    }
+
+    /**
+     * Returns whether this setting is visible based on its dependencies.
+     */
+    public boolean isDependencyVisible() {
+        return dependencyVisible;
     }
 
     /**

@@ -13,6 +13,8 @@ import de.peter1337.midnight.render.Render2D.RenderShape;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.text.Text;
+
+import java.awt.Color;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +35,11 @@ public class ClickGuiScreen extends GuiScreen {
     private float targetModuleScroll = 0f;
     private float currentModuleScroll = 0f;
 
+    // Scrollbar elements
+    private RenderShape moduleScrollbarTrack;
+    private RenderShape moduleScrollbarThumb;
+    private boolean isDraggingScrollbar = false;
+
     // Animation parameters.
     private static final float SCROLL_SPEED = 28f;
     private static final float SCROLL_ANIMATION_SPEED = 0.15f;
@@ -44,6 +51,15 @@ public class ClickGuiScreen extends GuiScreen {
     private static final float CATEGORY_GAP = 10f;
     private static final float ICON_SCALE = 0.9f;
     private static final float CATEGORY_MARGIN = 10f;
+
+    // Scrollbar constants
+    private static final float SCROLLBAR_WIDTH = 2f;
+    private static final float SCROLLBAR_RIGHT_MARGIN = 4f;
+    private static final float SCROLLBAR_MIN_THUMB_HEIGHT = 40f;
+    private static final Color SCROLLBAR_TRACK_COLOR = new Color(40, 40, 60, 120);
+    private static final Color SCROLLBAR_THUMB_COLOR = new Color(100, 100, 140, 200);
+    private static final Color SCROLLBAR_THUMB_HOVER_COLOR = new Color(120, 120, 160, 225);
+    private static final Color SCROLLBAR_THUMB_DRAG_COLOR = new Color(140, 140, 180, 255);
 
     public ClickGuiScreen() {
         super(Text.literal("ClickGUI"));
@@ -70,6 +86,7 @@ public class ClickGuiScreen extends GuiScreen {
 
         initializeCategories();
         initializeModules();
+        initializeScrollbars();
 
         // Set selected category using saved state.
         if (ConfigManager.savedCategory != null && !ConfigManager.savedCategory.isEmpty()) {
@@ -138,6 +155,118 @@ public class ClickGuiScreen extends GuiScreen {
         }
     }
 
+    private void initializeScrollbars() {
+        if (background == null || background.getModuleSection() == null) return;
+
+        // For modules section
+        RenderShape moduleSection = background.getModuleSection();
+        float moduleX = moduleSection.getX() + moduleSection.getWidth() - SCROLLBAR_WIDTH - SCROLLBAR_RIGHT_MARGIN;
+        float moduleY = moduleSection.getY();
+        float moduleHeight = moduleSection.getHeight();
+
+        moduleScrollbarTrack = render2D.createRoundedRect(
+                moduleX,
+                moduleY,
+                SCROLLBAR_WIDTH,
+                moduleHeight,
+                SCROLLBAR_WIDTH / 2,
+                SCROLLBAR_TRACK_COLOR
+        );
+        moduleScrollbarTrack.attachTo(moduleSection,
+                moduleSection.getWidth() - SCROLLBAR_WIDTH - SCROLLBAR_RIGHT_MARGIN,
+                0);
+
+        // Create scrollbar thumb with placeholder size/position (will be updated in render)
+        moduleScrollbarThumb = render2D.createRoundedRect(
+                moduleX,
+                moduleY,
+                SCROLLBAR_WIDTH,
+                SCROLLBAR_MIN_THUMB_HEIGHT,
+                SCROLLBAR_WIDTH / 2,
+                SCROLLBAR_THUMB_COLOR
+        );
+        moduleScrollbarThumb.attachTo(moduleScrollbarTrack, 0, 0);
+    }
+
+    private void updateScrollbarThumb() {
+        if (moduleScrollbarThumb == null || moduleScrollbarTrack == null || selectedCategory == null) return;
+
+        float maxScroll = calculateMaxModuleScroll();
+
+        // Calculate basic thumb properties
+        float trackHeight = moduleScrollbarTrack.getHeight();
+        float totalContentHeight = maxScroll + background.getModuleSection().getHeight() - MODULES_TOP_MARGIN;
+        float visibleRatio = background.getModuleSection().getHeight() / totalContentHeight;
+        visibleRatio = Math.min(1.0f, Math.max(0.1f, visibleRatio)); // Clamp between 0.1 and 1.0
+        float thumbHeight = Math.max(SCROLLBAR_MIN_THUMB_HEIGHT,
+                visibleRatio * trackHeight);
+
+        // Position the thumb based on current scroll state
+        float thumbY;
+
+        // Check if we're at the scroll limits or close to them (allowing some floating point imprecision)
+        float epsilon = 0.0f; // Small tolerance value
+
+        if (maxScroll <= 0) {
+            // No scrollable content, position at top
+            thumbY = 0;
+        } else if (currentModuleScroll <= epsilon) {
+            // At the top
+            thumbY = 0;
+        } else if (maxScroll - targetCategoryScroll <= epsilon) {
+            // At the bottom - snap exactly to bottom
+            thumbY = trackHeight - thumbHeight;
+        } else {
+            // Between limits, calculate proportional position
+            float scrollRatio = currentModuleScroll / maxScroll;
+            // Ensure ratio is between 0 and 1
+            scrollRatio = Math.min(1.0f, Math.max(0.0f, scrollRatio));
+            float availableSpace = trackHeight - thumbHeight;
+            thumbY = availableSpace * scrollRatio;
+        }
+
+        // Update thumb position
+        moduleScrollbarThumb.attachTo(moduleScrollbarTrack, 0, thumbY);
+
+        // Only show scrollbar if content is scrollable
+        boolean scrollable = maxScroll > 0;
+        Color thumbColor = SCROLLBAR_THUMB_COLOR;
+
+        // Check if mouse is hovering over scrollbar
+        if (scrollable) {
+            double mouseX = MinecraftClient.getInstance().mouse.getX() /
+                    MinecraftClient.getInstance().getWindow().getScaleFactor();
+            double mouseY = MinecraftClient.getInstance().mouse.getY() /
+                    MinecraftClient.getInstance().getWindow().getScaleFactor();
+
+            boolean hovered = mouseX >= moduleScrollbarThumb.getX() &&
+                    mouseX <= moduleScrollbarThumb.getX() + moduleScrollbarThumb.getWidth() &&
+                    mouseY >= moduleScrollbarThumb.getY() &&
+                    mouseY <= moduleScrollbarThumb.getY() + thumbHeight;
+
+            if (isDraggingScrollbar) {
+                thumbColor = SCROLLBAR_THUMB_DRAG_COLOR;
+            } else if (hovered) {
+                thumbColor = SCROLLBAR_THUMB_HOVER_COLOR;
+            }
+        }
+
+        // Show/hide and update thumb color
+        moduleScrollbarTrack.setFillColor(scrollable ? SCROLLBAR_TRACK_COLOR : new Color(0, 0, 0, 0));
+        moduleScrollbarThumb.setFillColor(scrollable ? thumbColor : new Color(0, 0, 0, 0));
+
+        // Debug information - uncomment if needed
+        /*
+        System.out.println("Current scroll: " + currentModuleScroll);
+        System.out.println("Max scroll: " + maxScroll);
+        System.out.println("Ratio: " + (currentModuleScroll / maxScroll));
+        System.out.println("Thumb position: " + thumbY);
+        System.out.println("Track height: " + trackHeight);
+        System.out.println("Thumb height: " + thumbHeight);
+        System.out.println("At bottom: " + (maxScroll - currentModuleScroll <= epsilon));
+        */
+    }
+
     @Override
     public void renderBackground(DrawContext context, int mouseX, int mouseY, float delta) {
         if (background != null && background.getOverlay() != null) {
@@ -168,6 +297,10 @@ public class ClickGuiScreen extends GuiScreen {
                 cumulativeY += moduleButton.getTotalHeight() + 5f;
             }
         }
+
+        // Update scrollbar position and appearance
+        updateScrollbarThumb();
+
         super.render(context, mouseX, mouseY, delta);
         categoryButtons.forEach(button -> {
             button.updateColor();
@@ -185,6 +318,30 @@ public class ClickGuiScreen extends GuiScreen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // Check if clicking on scrollbar thumb
+        if (moduleScrollbarThumb != null && button == 0) {
+            boolean thumbVisible = moduleScrollbarThumb.getFillColor().getAlpha() > 0;
+            if (thumbVisible && mouseX >= moduleScrollbarThumb.getX() &&
+                    mouseX <= moduleScrollbarThumb.getX() + moduleScrollbarThumb.getWidth() &&
+                    mouseY >= moduleScrollbarThumb.getY() &&
+                    mouseY <= moduleScrollbarThumb.getY() + moduleScrollbarThumb.getHeight()) {
+                isDraggingScrollbar = true;
+                return true;
+            }
+
+            // Check if clicking on scrollbar track
+            if (thumbVisible && moduleScrollbarTrack != null &&
+                    mouseX >= moduleScrollbarTrack.getX() &&
+                    mouseX <= moduleScrollbarTrack.getX() + moduleScrollbarTrack.getWidth() &&
+                    mouseY >= moduleScrollbarTrack.getY() &&
+                    mouseY <= moduleScrollbarTrack.getY() + moduleScrollbarTrack.getHeight()) {
+                // Jump the scrollbar to this position
+                float clickPositionRatio = (float)(mouseY - moduleScrollbarTrack.getY()) / moduleScrollbarTrack.getHeight();
+                targetModuleScroll = calculateMaxModuleScroll() * clickPositionRatio;
+                return true;
+            }
+        }
+
         if (selectedCategory != null) {
             for (ClickGuiModuleButton moduleButton : moduleButtons.get(selectedCategory)) {
                 if (moduleButton.isHovered(mouseX, mouseY)) {
@@ -243,6 +400,21 @@ public class ClickGuiScreen extends GuiScreen {
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
+        // Handle scrollbar dragging
+        if (isDraggingScrollbar && button == 0 && moduleScrollbarTrack != null) {
+            // Calculate the new position ratio
+            float dragPosition = (float)(mouseY - moduleScrollbarTrack.getY());
+            float trackHeight = moduleScrollbarTrack.getHeight();
+
+            // Convert to scroll ratio (0.0 to 1.0)
+            float scrollRatio = dragPosition / trackHeight;
+            scrollRatio = Math.min(1.0f, Math.max(0.0f, scrollRatio)); // Clamp between 0 and 1
+
+            // Apply the new scroll position
+            targetModuleScroll = calculateMaxModuleScroll() * scrollRatio;
+            return true;
+        }
+
         // Update shadow position during dragging to ensure it follows in real-time
         if (background != null) {
             background.updateShadowPosition();
@@ -263,6 +435,12 @@ public class ClickGuiScreen extends GuiScreen {
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        // Handle scrollbar release
+        if (isDraggingScrollbar && button == 0) {
+            isDraggingScrollbar = false;
+            return true;
+        }
+
         if (selectedCategory != null) {
             for (ClickGuiModuleButton moduleButton : moduleButtons.get(selectedCategory)) {
                 for (SettingComponent setting : moduleButton.getSettingComponents()) {
@@ -297,17 +475,20 @@ public class ClickGuiScreen extends GuiScreen {
         float totalHeight = 0;
 
         for (ClickGuiModuleButton moduleButton : moduleButtons.get(selectedCategory)) {
-            // Base module height
+            // Get the base module height
             float moduleHeight = BUTTON_HEIGHT;
 
-            // If expanded, add heights of all settings including dropdowns
+            // If expanded, add all setting heights including dropdowns
             if (moduleButton.isExpanded()) {
                 for (SettingComponent setting : moduleButton.getSettingComponents()) {
-                    // Use the setting's total height which includes dropdown options if expanded
-                    moduleHeight += setting.getTotalHeight() + SETTINGS_PADDING;
+                    // This will include extra height for expanded dropdowns
+                    if (setting.isDependencyVisible()) {
+                        moduleHeight += setting.getTotalHeight() + SETTINGS_PADDING;
+                    }
                 }
             }
 
+            // Add this module's total height plus spacing
             totalHeight += moduleHeight + 5; // 5px spacing between modules
         }
 

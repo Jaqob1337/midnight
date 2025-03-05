@@ -84,8 +84,8 @@ public class DropdownComponent {
             optionShapes.add(optionShape);
             optionY += DROPDOWN_HEIGHT;
         }
-
     }
+
     /**
      * Collapses the dropdown by setting each option's fill color to transparent and clearing the option shapes.
      */
@@ -95,7 +95,6 @@ public class DropdownComponent {
             optionShape.setFillColor(TRANSPARENT);
         }
         optionShapes.clear();
-
     }
 
     /**
@@ -408,6 +407,11 @@ public class DropdownComponent {
         return expanded;
     }
 
+    /**
+     * Returns the number of options in this dropdown.
+     *
+     * @return the number of options
+     */
     public int getOptionsCount() {
         return options.size();
     }

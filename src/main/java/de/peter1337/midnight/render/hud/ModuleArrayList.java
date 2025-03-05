@@ -7,6 +7,7 @@ import de.peter1337.midnight.render.font.CustomFontRenderer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.util.math.MatrixStack;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -26,10 +27,12 @@ public class ModuleArrayList {
 
         int screenWidth = mc.getWindow().getScaledWidth();
 
-        // Filter out modules that shouldn't be shown in the array list using the visibility manager.
+        // Filter out modules that shouldn't be shown in the array list using the visibility manager
+        // Sort by name length in descending order
         List<Module> enabledModules = ModuleManager.getModules().stream()
                 .filter(Module::isEnabled)
                 .filter(module -> !ModuleVisibilityManager.isHidden(module))
+                .sorted(Comparator.comparingInt((Module module) -> module.getName().length()).reversed())
                 .collect(Collectors.toList());
 
         int y = TOP_MARGIN;

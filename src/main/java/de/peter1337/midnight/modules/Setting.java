@@ -3,6 +3,7 @@ package de.peter1337.midnight.modules;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 
 public class Setting<T> {
     private final String name;
@@ -12,6 +13,10 @@ public class Setting<T> {
     private T maxValue;
     private final List<T> options;
     private BiConsumer<T, T> onChange;
+
+    // Dependency system
+    private Setting<?> parent;
+    private Supplier<Boolean> visibilityCondition;
 
     // Constructor for boolean settings.
     public Setting(String name, T defaultValue, String description) {
@@ -109,5 +114,51 @@ public class Setting<T> {
 
     public void setOnChange(BiConsumer<T, T> callback) {
         this.onChange = callback;
+    }
+
+    /**
+     * Makes this setting dependent on a parent boolean setting.
+     * This setting will only be visible when the parent setting is enabled.
+     *
+     * @param parent The parent boolean setting
+     * @return This setting instance for method chaining
+     */
+    public Setting<T> dependsOn(Setting<Boolean> parent) {
+        this.parent = parent;
+        this.visibilityCondition = () -> parent.getValue();
+        return this;
+    }
+
+    /**
+     * Sets a custom visibility condition for this setting.
+     * This setting will only be visible when the condition returns true.
+     *
+     * @param condition A supplier that returns true if the setting should be visible
+     * @return This setting instance for method chaining
+     */
+    public Setting<T> visibleWhen(Supplier<Boolean> condition) {
+        this.visibilityCondition = condition;
+        return this;
+    }
+
+    /**
+     * Checks if this setting should be visible based on its dependency conditions.
+     *
+     * @return true if the setting should be visible, false otherwise
+     */
+    public boolean isVisible() {
+        if (visibilityCondition != null) {
+            return visibilityCondition.get();
+        }
+        return true;
+    }
+
+    /**
+     * Gets the parent setting that this setting depends on.
+     *
+     * @return The parent setting, or null if there is no parent
+     */
+    public Setting<?> getParent() {
+        return parent;
     }
 }

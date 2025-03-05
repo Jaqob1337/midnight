@@ -22,10 +22,6 @@ public class NotificationBlocker extends Module {
             new Setting<>("BlockSystemMessages", Boolean.FALSE, "Block system chat messages (e.g. server join messages)")
     );
 
-    private final Setting<Boolean> blockTutorials = register(
-            new Setting<>("BlockTutorials", Boolean.TRUE, "Block tutorial notifications")
-    );
-
     private final Setting<Boolean> blockStatusEffects = register(
             new Setting<>("BlockStatusEffects", Boolean.TRUE, "Block status effect icons (potions) in the top-right corner")
     );
@@ -77,15 +73,6 @@ public class NotificationBlocker extends Module {
      */
     public boolean shouldBlockSystemMessages() {
         return isEnabled() && blockSystemMessages.getValue();
-    }
-
-    /**
-     * Gets whether tutorial notifications should be blocked.
-     *
-     * @return true if tutorial notifications should be blocked
-     */
-    public boolean shouldBlockTutorials() {
-        return isEnabled() && blockTutorials.getValue();
     }
 
     /**
