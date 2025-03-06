@@ -193,78 +193,70 @@ public class ClickGuiScreen extends GuiScreen {
 
         float maxScroll = calculateMaxModuleScroll();
 
-        // Calculate basic thumb properties
-        float trackHeight = moduleScrollbarTrack.getHeight();
-        float totalContentHeight = maxScroll + background.getModuleSection().getHeight() - MODULES_TOP_MARGIN;
-        float visibleRatio = background.getModuleSection().getHeight() / totalContentHeight;
-        visibleRatio = Math.min(1.0f, Math.max(0.1f, visibleRatio)); // Clamp between 0.1 and 1.0
-        float thumbHeight = Math.max(SCROLLBAR_MIN_THUMB_HEIGHT,
-                visibleRatio * trackHeight);
-
-        // Position the thumb based on current scroll state
-        float thumbY;
-
-        // Check if we're at the scroll limits or close to them (allowing some floating point imprecision)
-        float epsilon = 0.0f; // Small tolerance value
-
+        // Early exit if no scrollable content
         if (maxScroll <= 0) {
-            // No scrollable content, position at top
-            thumbY = 0;
-        } else if (currentModuleScroll <= epsilon) {
-            // At the top
-            thumbY = 0;
-        } else if (maxScroll - targetCategoryScroll <= epsilon) {
-            // At the bottom - snap exactly to bottom
-            thumbY = trackHeight - thumbHeight;
+            moduleScrollbarTrack.setFillColor(new Color(0, 0, 0, 0));
+            moduleScrollbarThumb.setFillColor(new Color(0, 0, 0, 0));
+            return;
+        }
+
+        // Make scrollbar visible
+        moduleScrollbarTrack.setFillColor(SCROLLBAR_TRACK_COLOR);
+
+        // Dimensions
+        float trackHeight = moduleScrollbarTrack.getHeight();
+
+        // Use a fixed size for the thumb - this makes it more usable
+        float thumbHeight = SCROLLBAR_MIN_THUMB_HEIGHT;
+
+        // The available space where thumb can move
+        float availableTrackSpace = trackHeight - thumbHeight;
+
+        // Handle special case: force thumb to bottom when target is at max
+        // This ensures the thumb reaches the bottom when you can't scroll further
+        if (targetModuleScroll >= maxScroll || currentModuleScroll >= maxScroll * 0.95f) {
+            moduleScrollbarThumb.attachTo(moduleScrollbarTrack, 0, availableTrackSpace);
+            moduleScrollbarThumb.setFillColor(isDraggingScrollbar ? SCROLLBAR_THUMB_DRAG_COLOR : SCROLLBAR_THUMB_COLOR);
+            return;
+        }
+
+        // Handle special case: force thumb to top when at top
+        if (targetModuleScroll <= 0 || currentModuleScroll <= 0) {
+            moduleScrollbarThumb.attachTo(moduleScrollbarTrack, 0, 0);
+            moduleScrollbarThumb.setFillColor(isDraggingScrollbar ? SCROLLBAR_THUMB_DRAG_COLOR : SCROLLBAR_THUMB_COLOR);
+            return;
+        }
+
+        // Normal case: calculate proportion
+        float scrollProgress = currentModuleScroll / maxScroll;
+        scrollProgress = Math.min(0.95f, scrollProgress); // Cap at 95% to allow forcing to bottom
+
+        // Position the thumb proportionally
+        float thumbY = scrollProgress * availableTrackSpace;
+
+        // Check if mouse is hovering
+        double mouseX = MinecraftClient.getInstance().mouse.getX() /
+                MinecraftClient.getInstance().getWindow().getScaleFactor();
+        double mouseY = MinecraftClient.getInstance().mouse.getY() /
+                MinecraftClient.getInstance().getWindow().getScaleFactor();
+
+        boolean hovered = mouseX >= moduleScrollbarThumb.getX() &&
+                mouseX <= moduleScrollbarThumb.getX() + moduleScrollbarThumb.getWidth() &&
+                mouseY >= moduleScrollbarThumb.getY() &&
+                mouseY <= moduleScrollbarThumb.getY() + thumbHeight;
+
+        // Set color and position
+        Color thumbColor;
+        if (isDraggingScrollbar) {
+            thumbColor = SCROLLBAR_THUMB_DRAG_COLOR;
+        } else if (hovered) {
+            thumbColor = SCROLLBAR_THUMB_HOVER_COLOR;
         } else {
-            // Between limits, calculate proportional position
-            float scrollRatio = currentModuleScroll / maxScroll;
-            // Ensure ratio is between 0 and 1
-            scrollRatio = Math.min(1.0f, Math.max(0.0f, scrollRatio));
-            float availableSpace = trackHeight - thumbHeight;
-            thumbY = availableSpace * scrollRatio;
+            thumbColor = SCROLLBAR_THUMB_COLOR;
         }
 
-        // Update thumb position
+        moduleScrollbarThumb.setFillColor(thumbColor);
         moduleScrollbarThumb.attachTo(moduleScrollbarTrack, 0, thumbY);
-
-        // Only show scrollbar if content is scrollable
-        boolean scrollable = maxScroll > 0;
-        Color thumbColor = SCROLLBAR_THUMB_COLOR;
-
-        // Check if mouse is hovering over scrollbar
-        if (scrollable) {
-            double mouseX = MinecraftClient.getInstance().mouse.getX() /
-                    MinecraftClient.getInstance().getWindow().getScaleFactor();
-            double mouseY = MinecraftClient.getInstance().mouse.getY() /
-                    MinecraftClient.getInstance().getWindow().getScaleFactor();
-
-            boolean hovered = mouseX >= moduleScrollbarThumb.getX() &&
-                    mouseX <= moduleScrollbarThumb.getX() + moduleScrollbarThumb.getWidth() &&
-                    mouseY >= moduleScrollbarThumb.getY() &&
-                    mouseY <= moduleScrollbarThumb.getY() + thumbHeight;
-
-            if (isDraggingScrollbar) {
-                thumbColor = SCROLLBAR_THUMB_DRAG_COLOR;
-            } else if (hovered) {
-                thumbColor = SCROLLBAR_THUMB_HOVER_COLOR;
-            }
-        }
-
-        // Show/hide and update thumb color
-        moduleScrollbarTrack.setFillColor(scrollable ? SCROLLBAR_TRACK_COLOR : new Color(0, 0, 0, 0));
-        moduleScrollbarThumb.setFillColor(scrollable ? thumbColor : new Color(0, 0, 0, 0));
-
-        // Debug information - uncomment if needed
-        /*
-        System.out.println("Current scroll: " + currentModuleScroll);
-        System.out.println("Max scroll: " + maxScroll);
-        System.out.println("Ratio: " + (currentModuleScroll / maxScroll));
-        System.out.println("Thumb position: " + thumbY);
-        System.out.println("Track height: " + trackHeight);
-        System.out.println("Thumb height: " + thumbHeight);
-        System.out.println("At bottom: " + (maxScroll - currentModuleScroll <= epsilon));
-        */
     }
 
     @Override
@@ -335,9 +327,30 @@ public class ClickGuiScreen extends GuiScreen {
                     mouseX <= moduleScrollbarTrack.getX() + moduleScrollbarTrack.getWidth() &&
                     mouseY >= moduleScrollbarTrack.getY() &&
                     mouseY <= moduleScrollbarTrack.getY() + moduleScrollbarTrack.getHeight()) {
-                // Jump the scrollbar to this position
-                float clickPositionRatio = (float)(mouseY - moduleScrollbarTrack.getY()) / moduleScrollbarTrack.getHeight();
-                targetModuleScroll = calculateMaxModuleScroll() * clickPositionRatio;
+                // Calculate scrollbar properties
+                float trackHeight = moduleScrollbarTrack.getHeight();
+                float maxScroll = calculateMaxModuleScroll();
+                float totalContentHeight = maxScroll + background.getModuleSection().getHeight();
+                float visiblePortionRatio = background.getModuleSection().getHeight() / totalContentHeight;
+                float thumbHeight = Math.max(SCROLLBAR_MIN_THUMB_HEIGHT, visiblePortionRatio * trackHeight);
+                float availableTrackSpace = trackHeight - thumbHeight;
+
+                // Calculate the target position, accounting for thumb height
+                float clickPosition = (float)(mouseY - moduleScrollbarTrack.getY());
+
+                // If clicking above/below the possible thumb positions, adjust accordingly
+                if (clickPosition < thumbHeight/2) {
+                    clickPosition = 0;
+                } else if (clickPosition > trackHeight - thumbHeight/2) {
+                    clickPosition = availableTrackSpace;
+                } else {
+                    clickPosition -= thumbHeight/2;
+                    clickPosition = Math.max(0, Math.min(availableTrackSpace, clickPosition));
+                }
+
+                // Convert to scroll ratio and apply
+                float clickPositionRatio = clickPosition / availableTrackSpace;
+                targetModuleScroll = maxScroll * clickPositionRatio;
                 return true;
             }
         }
@@ -402,16 +415,34 @@ public class ClickGuiScreen extends GuiScreen {
     public boolean mouseDragged(double mouseX, double mouseY, int button, double deltaX, double deltaY) {
         // Handle scrollbar dragging
         if (isDraggingScrollbar && button == 0 && moduleScrollbarTrack != null) {
-            // Calculate the new position ratio
-            float dragPosition = (float)(mouseY - moduleScrollbarTrack.getY());
+            // Calculate the available track space (where thumb can move)
             float trackHeight = moduleScrollbarTrack.getHeight();
+            float maxScroll = calculateMaxModuleScroll();
+            float totalContentHeight = maxScroll + background.getModuleSection().getHeight();
+            float visiblePortionRatio = background.getModuleSection().getHeight() / totalContentHeight;
+            float thumbHeight = Math.max(SCROLLBAR_MIN_THUMB_HEIGHT, visiblePortionRatio * trackHeight);
+            float availableTrackSpace = trackHeight - thumbHeight;
+
+            // Calculate mouse position relative to track
+            float dragPosition = (float)(mouseY - moduleScrollbarTrack.getY());
+
+            // Account for thumb height by clamping drag position
+            if (dragPosition < thumbHeight/2) {
+                dragPosition = 0;
+            } else if (dragPosition > trackHeight - thumbHeight/2) {
+                dragPosition = availableTrackSpace;
+            } else {
+                // Adjust to account for thumb position
+                dragPosition -= thumbHeight/2;
+                // Ensure it's within the available space
+                dragPosition = Math.max(0, Math.min(availableTrackSpace, dragPosition));
+            }
 
             // Convert to scroll ratio (0.0 to 1.0)
-            float scrollRatio = dragPosition / trackHeight;
-            scrollRatio = Math.min(1.0f, Math.max(0.0f, scrollRatio)); // Clamp between 0 and 1
+            float scrollRatio = dragPosition / availableTrackSpace;
 
             // Apply the new scroll position
-            targetModuleScroll = calculateMaxModuleScroll() * scrollRatio;
+            targetModuleScroll = maxScroll * scrollRatio;
             return true;
         }
 
@@ -464,7 +495,17 @@ public class ClickGuiScreen extends GuiScreen {
             return true;
         } else if (selectedCategory != null && isMouseOverModules(mouseX, mouseY)) {
             float maxScroll = calculateMaxModuleScroll();
-            targetModuleScroll = Math.max(0, Math.min(targetModuleScroll - (float) verticalAmount * SCROLL_SPEED, maxScroll));
+
+            // Apply scrolling with an extra step to detect reaching max scroll
+            float newTargetScroll = targetModuleScroll - (float) verticalAmount * SCROLL_SPEED;
+
+            // If we're scrolling down (verticalAmount < 0) and would exceed max,
+            // explicitly set to exactly max
+            if (verticalAmount < 0 && newTargetScroll > maxScroll) {
+                targetModuleScroll = maxScroll;
+            } else {
+                targetModuleScroll = Math.max(0, Math.min(newTargetScroll, maxScroll));
+            }
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
@@ -492,7 +533,7 @@ public class ClickGuiScreen extends GuiScreen {
             totalHeight += moduleHeight + 5; // 5px spacing between modules
         }
 
-        float visibleHeight = background.getBackground().getHeight() - MODULES_TOP_MARGIN;
+        float visibleHeight = background.getModuleSection().getHeight() - MODULES_TOP_MARGIN;
         return Math.max(0, totalHeight - visibleHeight);
     }
 
