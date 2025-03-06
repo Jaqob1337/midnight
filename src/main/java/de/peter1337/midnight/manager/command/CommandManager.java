@@ -3,13 +3,16 @@ package de.peter1337.midnight.manager.command;
 import de.peter1337.midnight.Midnight;
 import de.peter1337.midnight.manager.BindManager;
 import de.peter1337.midnight.manager.ModuleManager;
-import de.peter1337.midnight.manager.ConfigManager; // Import the new config manager
+import de.peter1337.midnight.manager.ConfigManager;
 import de.peter1337.midnight.manager.ModuleVisibilityManager;
 import de.peter1337.midnight.modules.Module;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
 
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class CommandManager {
@@ -82,16 +85,61 @@ public class CommandManager {
             module.toggle();
             sendMessage(module.getName() + " is now " + (module.isEnabled() ? "enabled" : "disabled"));
         } else if (args[0].equalsIgnoreCase("config")) {
-            if (args.length < 3) {
-                sendMessage("Usage: .config <save/load> <name>");
+            if (args.length < 2) {
+                sendMessage("Usage: .config <save/load/list> <n>");
                 return;
             }
+
             String subCommand = args[1];
+
+            if (subCommand.equalsIgnoreCase("list")) {
+                // List all available configs
+                List<String> configs = getAvailableConfigs();
+                if (configs.isEmpty()) {
+                    sendMessage("No configs found. Use .config save <n> to create one.");
+                } else {
+                    sendMessage("Available configs:");
+                    StringBuilder builder = new StringBuilder();
+                    int counter = 0;
+
+                    for (String config : configs) {
+                        builder.append(config);
+                        counter++;
+
+                        // Add comma if not the last item
+                        if (counter < configs.size()) {
+                            builder.append(", ");
+                        }
+
+                        // Create a new line every 5 configs for readability
+                        if (counter % 5 == 0 && counter < configs.size()) {
+                            sendMessage(" - " + builder.toString());
+                            builder = new StringBuilder();
+                        }
+                    }
+
+                    // Send any remaining configs
+                    if (builder.length() > 0) {
+                        sendMessage(" - " + builder.toString());
+                    }
+                }
+                return;
+            }
+
+            if (args.length < 3) {
+                sendMessage("Usage: .config <save/load> <n>");
+                return;
+            }
+
             String configName = args[2];
             if (subCommand.equalsIgnoreCase("save")) {
                 ConfigManager.saveConfig(configName);
                 sendMessage("Saved config: " + configName);
             } else if (subCommand.equalsIgnoreCase("load")) {
+                if (!ConfigManager.configExists(configName)) {
+                    sendMessage("§cConfig not found: " + configName);
+                    return;
+                }
                 ConfigManager.loadConfig(configName);
                 sendMessage("Loaded config: " + configName);
             } else {
@@ -138,15 +186,40 @@ public class CommandManager {
             sendMessage("Showing " + module.getName() + " in the HUD");
         } else if (args[0].equalsIgnoreCase("help")) {
             // Display all available commands.
-            sendMessage("Available commands:");
+            sendMessage(" - .help                    : Show this help message");
             sendMessage(" - .bind <module> <key>       : Bind a key to a module");
             sendMessage(" - .list                     : List all modules");
             sendMessage(" - .toggle <module>          : Toggle a module on/off");
-            sendMessage(" - .config <save/load> <name>: Save or load a config");
+            sendMessage(" - .config list              : List all saved configs");
+            sendMessage(" - .config <save/load> <n>   : Save or load a config");
             sendMessage(" - .visible <module>         : Toggle module visibility in HUD");
             sendMessage(" - .hide <module>            : Hide module from HUD");
             sendMessage(" - .show <module>            : Show module in HUD");
         }
+    }
+
+    /**
+     * Gets a list of all available config files
+     *
+     * @return List of config names without the .json extension
+     */
+    private static List<String> getAvailableConfigs() {
+        List<String> configs = new ArrayList<>();
+
+        if (Midnight.CONFIG_DIR.exists() && Midnight.CONFIG_DIR.isDirectory()) {
+            File[] configFiles = Midnight.CONFIG_DIR.listFiles((dir, name) -> name.toLowerCase().endsWith(".json"));
+
+            if (configFiles != null) {
+                for (File file : configFiles) {
+                    // Remove .json extension
+                    configs.add(file.getName().substring(0, file.getName().length() - 5));
+                }
+            }
+        }
+
+        // Sort alphabetically for better display
+        Collections.sort(configs);
+        return configs;
     }
 
     /**

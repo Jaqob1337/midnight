@@ -19,7 +19,7 @@ public class NotificationBlocker extends Module {
     );
 
     private final Setting<Boolean> blockSystemMessages = register(
-            new Setting<>("BlockSystemMessages", Boolean.FALSE, "Block system chat messages (e.g. server join messages)")
+            new Setting<>("BlockSystemMessages", Boolean.TRUE, "Block system chat messages (e.g. server join messages)")
     );
 
     private final Setting<Boolean> blockStatusEffects = register(

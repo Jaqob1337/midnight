@@ -2,6 +2,7 @@ package de.peter1337.midnight.manager;
 
 import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.modules.movement.Sprint;
+import de.peter1337.midnight.modules.player.InvManager;
 import de.peter1337.midnight.modules.player.Stealer;
 import de.peter1337.midnight.modules.render.ClickGuiModule;
 import de.peter1337.midnight.modules.render.ESP;
@@ -20,6 +21,7 @@ public class ModuleManager {
         registerModule(new ClickGuiModule());
         registerModule(new Stealer());
         registerModule(new NotificationBlocker());
+        registerModule(new InvManager());
     }
 
     private static void registerModule(Module module) {

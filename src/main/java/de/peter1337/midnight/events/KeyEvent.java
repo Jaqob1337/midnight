@@ -5,6 +5,7 @@ import org.lwjgl.glfw.GLFW;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * KeyEvent handles key event registration and polling.
@@ -14,7 +15,8 @@ public class KeyEvent {
         void onKey();
     }
 
-    private static final Map<String, RegisteredKey> keyEvents = new HashMap<>();
+    // Change to ConcurrentHashMap to avoid ConcurrentModificationException
+    private static final Map<String, RegisteredKey> keyEvents = new ConcurrentHashMap<>();
     // Tracks previous key states to detect transitions.
     private static final Map<Integer, Boolean> keyPressed = new HashMap<>();
 
@@ -59,7 +61,10 @@ public class KeyEvent {
         if (mc == null || mc.getWindow() == null) return;
 
         long windowHandle = mc.getWindow().getHandle();
-        keyEvents.values().forEach(reg -> {
+
+        // Create a copy of the entries to avoid concurrent modification
+        for (Map.Entry<String, RegisteredKey> entry : keyEvents.entrySet()) {
+            RegisteredKey reg = entry.getValue();
             boolean currentlyPressed = GLFW.glfwGetKey(windowHandle, reg.keyCode) == GLFW.GLFW_PRESS;
             boolean wasPressed = keyPressed.getOrDefault(reg.keyCode, false);
 
@@ -68,6 +73,6 @@ public class KeyEvent {
                 reg.callback.onKey();
             }
             keyPressed.put(reg.keyCode, currentlyPressed);
-        });
+        }
     }
 }

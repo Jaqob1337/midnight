@@ -1,5 +1,6 @@
 package de.peter1337.midnight.manager.command;
 
+import de.peter1337.midnight.Midnight;
 import de.peter1337.midnight.manager.ModuleManager;
 import de.peter1337.midnight.modules.Module;
 import net.minecraft.client.MinecraftClient;
@@ -14,7 +15,7 @@ import java.util.List;
 public class CommandAutoComplete {
     // Supported dot commands (without the dot)
     private static final List<String> COMMANDS = List.of("bind", "list", "toggle", "config");
-    private static final List<String> CONFIG_COMMANDS = List.of("save", "load");
+    private static final List<String> CONFIG_COMMANDS = List.of("save", "load", "list");
 
     // Store the current suggestions to be rendered.
     public static List<String> currentSuggestions = new ArrayList<>();
@@ -27,11 +28,10 @@ public class CommandAutoComplete {
 
     // Get list of existing config files
     private static List<String> getConfigFiles() {
-        File configDir = new File("configs");
         List<String> configNames = new ArrayList<>();
 
-        if (configDir.exists() && configDir.isDirectory()) {
-            File[] configFiles = configDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".json"));
+        if (Midnight.CONFIG_DIR.exists() && Midnight.CONFIG_DIR.isDirectory()) {
+            File[] configFiles = Midnight.CONFIG_DIR.listFiles((dir, name) -> name.toLowerCase().endsWith(".json"));
             if (configFiles != null) {
                 for (File file : configFiles) {
                     // Remove .json extension

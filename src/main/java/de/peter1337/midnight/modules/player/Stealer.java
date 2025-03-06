@@ -121,7 +121,7 @@ public class Stealer extends Module {
 
         if (randomDelay.getValue()) {
             // Add slight variation (±10% of the base delay)
-            float variation = delay.getValue() * 0.1f;
+            float variation = delay.getValue() * 0.8f;
             actualDelay = delay.getValue() + (float)(Math.random() * variation * 2 - variation);
         } else {
             actualDelay = delay.getValue();

@@ -16,15 +16,45 @@ import net.minecraft.util.Identifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
+
 public class Midnight implements ModInitializer {
 	public static final String CLIENT_NAME = "midnight";
 	public static final String MOD_ID = CLIENT_NAME;
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 	public static final String VERSION = "0.0.1";
 
+	// Directory structure
+	public static final File BASE_DIR = new File("midnight");
+	public static final File CONFIG_DIR = new File(BASE_DIR, "configs");
+
+	/**
+	 * Creates the necessary directories for the client
+	 */
+	private void initializeDirectories() {
+		if (!BASE_DIR.exists()) {
+			if (BASE_DIR.mkdir()) {
+				LOGGER.info("Created base directory: {}", BASE_DIR.getAbsolutePath());
+			} else {
+				LOGGER.error("Failed to create base directory: {}", BASE_DIR.getAbsolutePath());
+			}
+		}
+
+		if (!CONFIG_DIR.exists()) {
+			if (CONFIG_DIR.mkdir()) {
+				LOGGER.info("Created configs directory: {}", CONFIG_DIR.getAbsolutePath());
+			} else {
+				LOGGER.error("Failed to create configs directory: {}", CONFIG_DIR.getAbsolutePath());
+			}
+		}
+	}
+
 	@Override
 	public void onInitialize() {
 		LOGGER.info("Initializing {} mod...", CLIENT_NAME);
+
+		// Create necessary directories
+		initializeDirectories();
 
 		// Manager
 		ModuleManager.init();
