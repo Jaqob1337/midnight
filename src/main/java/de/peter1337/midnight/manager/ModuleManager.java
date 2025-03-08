@@ -1,6 +1,7 @@
 package de.peter1337.midnight.manager;
 
 import de.peter1337.midnight.modules.Module;
+import de.peter1337.midnight.modules.combat.Aura;
 import de.peter1337.midnight.modules.movement.Sprint;
 import de.peter1337.midnight.modules.player.InvManager;
 import de.peter1337.midnight.modules.player.Stealer;
@@ -24,6 +25,7 @@ public class ModuleManager {
         registerModule(new NotificationBlocker());
         registerModule(new InvManager());
         registerModule(new Velocity());
+        registerModule(new Aura());
     }
 
     private static void registerModule(Module module) {

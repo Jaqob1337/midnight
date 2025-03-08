@@ -5,10 +5,12 @@
 	"compatibilityLevel": "JAVA_17",
 	"client": [
 		"AdvancementMixin",
+		"BodyRotationMixin",
 		"ChatMixin",
 		"ChatScreenAccessor",
 		"EntityGlowingMixin",
 		"PlayerVelocityMixin",
+		"RotationMixin",
 		"StatusEffectHudMixin",
 		"SystemMessageMixin",
 		"TitleScreenMixin",

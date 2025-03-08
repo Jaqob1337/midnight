@@ -16,6 +16,11 @@ public class TickHandler {
             // You no longer need to call CustomFontRenderer.init() here,
             // as each component will request its own instance.
 
+            // Initialize RotationHandler if not done yet
+            if (client != null && client.player != null) {
+                RotationHandler.onUpdate();
+            }
+
             // Update modules.
             ModuleManager.onUpdate();
             // Process key events.
@@ -35,5 +40,8 @@ public class TickHandler {
             }
         });
 
+        // Initialize the RotationHandler
+        RotationHandler.init();
+        LOGGER.info("TickHandler initialized with RotationHandler");
     }
 }
