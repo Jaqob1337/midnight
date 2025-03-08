@@ -5,6 +5,7 @@ import de.peter1337.midnight.modules.Category;
 import de.peter1337.midnight.modules.Setting;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.screen.GenericContainerScreenHandler;
+import net.minecraft.screen.ScreenHandlerType;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.item.Item;
 import net.minecraft.item.Items;
@@ -56,6 +57,10 @@ public class Stealer extends Module {
             new Setting<>("SmartStealer", Boolean.TRUE, "Takes items only if you have space for them")
     );
 
+    private final Setting<Boolean> chestsOnly = register(
+            new Setting<>("ChestsOnly", Boolean.FALSE, "Only steal from containers named 'Chest'")
+    );
+
     // Add a list for whitelisted/blacklisted items
     private final List<Item> itemFilter = new ArrayList<>();
 
@@ -92,6 +97,13 @@ public class Stealer extends Module {
 
         // Check if we're in a container
         if (mc.player.currentScreenHandler instanceof GenericContainerScreenHandler) {
+            GenericContainerScreenHandler handler = (GenericContainerScreenHandler) mc.player.currentScreenHandler;
+
+            // Check if ChestsOnly is enabled and if the container is not a chest
+            if (chestsOnly.getValue() && !isChestContainer(handler)) {
+                return;
+            }
+
             // If this is the first time seeing this container, record the time
             if (containerOpenTime == 0) {
                 containerOpenTime = System.currentTimeMillis();
@@ -111,6 +123,15 @@ public class Stealer extends Module {
         }
     }
 
+    private boolean isChestContainer(GenericContainerScreenHandler handler) {
+        // Check if the screen handler type matches chest types
+        ScreenHandlerType<?> type = handler.getType();
+
+        // Most chests use GENERIC_9X3 (single chest) or GENERIC_9X6 (double chest)
+        // We can check if it's one of these types
+        return type == ScreenHandlerType.GENERIC_9X3 || type == ScreenHandlerType.GENERIC_9X6;
+    }
+
     private void stealItems() {
         GenericContainerScreenHandler handler = (GenericContainerScreenHandler) mc.player.currentScreenHandler;
         ClientPlayerEntity player = mc.player;
@@ -121,7 +142,7 @@ public class Stealer extends Module {
 
         if (randomDelay.getValue()) {
             // Add slight variation (±10% of the base delay)
-            float variation = delay.getValue() * 0.8f;
+            float variation = delay.getValue() * 1.8f;
             actualDelay = delay.getValue() + (float)(Math.random() * variation * 2 - variation);
         } else {
             actualDelay = delay.getValue();
@@ -182,54 +203,33 @@ public class Stealer extends Module {
                 continue;
             }
 
-            // Perform the quick move (shift-click) with bypass techniques
+            // Perform the quick move (shift-click) with modified human patterns
             if (humanPatterns.getValue()) {
-                // Sometimes hover over the item briefly before taking it
-                if (Math.random() < 0.3) {
-                    // Simulate a cursor hover by adding a small pause
+                // Hover over the item for half the delay value before taking it
+                long hoverTime = (long)(delay.getValue() * 500); // Half of delay in milliseconds
+
+                // Add some slight randomization to the hover time (±20%)
+                if (randomDelay.getValue()) {
+                    float variation = hoverTime * 0.5f;
+                    hoverTime += (long)(Math.random() * variation * 2 - variation);
+                }
+
+                if (hoverTime > 0) {
                     try {
-                        Thread.sleep((long)(Math.random() * 50));
+                        Thread.sleep(hoverTime);
                     } catch (InterruptedException e) {
                         // Ignore
                     }
                 }
 
-                // Occasionally use regular click + shift-click instead of just shift-click
-                if (Math.random() < 0.15) {
-                    // First click normally
-                    mc.interactionManager.clickSlot(
-                            handler.syncId,
-                            i,
-                            0,  // Button: 0 for left click
-                            net.minecraft.screen.slot.SlotActionType.PICKUP,
-                            player
-                    );
-
-                    // Small delay
-                    try {
-                        Thread.sleep((long)(Math.random() * 30));
-                    } catch (InterruptedException e) {
-                        // Ignore
-                    }
-
-                    // Then shift-click to put it back in inventory
-                    mc.interactionManager.clickSlot(
-                            handler.syncId,
-                            i,
-                            0,
-                            net.minecraft.screen.slot.SlotActionType.QUICK_MOVE,
-                            player
-                    );
-                } else {
-                    // Regular shift-click most of the time
-                    mc.interactionManager.clickSlot(
-                            handler.syncId,
-                            i,
-                            0,
-                            net.minecraft.screen.slot.SlotActionType.QUICK_MOVE,
-                            player
-                    );
-                }
+                // Regular shift-click (removed the alternate click method)
+                mc.interactionManager.clickSlot(
+                        handler.syncId,
+                        i,
+                        0,
+                        net.minecraft.screen.slot.SlotActionType.QUICK_MOVE,
+                        player
+                );
             } else {
                 // Regular shift-click if human patterns disabled
                 mc.interactionManager.clickSlot(

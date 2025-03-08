@@ -130,6 +130,20 @@ public class Setting<T> {
     }
 
     /**
+     * Makes this setting dependent on a parent dropdown setting having a specific value.
+     * This setting will only be visible when the parent setting has the specified value.
+     *
+     * @param parent The parent dropdown setting
+     * @param requiredValue The value that the parent setting must have for this setting to be visible
+     * @return This setting instance for method chaining
+     */
+    public Setting<T> dependsOn(Setting<String> parent, String requiredValue) {
+        this.parent = parent;
+        this.visibilityCondition = () -> parent.getValue().equals(requiredValue);
+        return this;
+    }
+
+    /**
      * Sets a custom visibility condition for this setting.
      * This setting will only be visible when the condition returns true.
      *

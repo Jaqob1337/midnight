@@ -1,41 +1,25 @@
 package de.peter1337.midnight.modules.player;
 
+import de.peter1337.midnight.manager.InventoryManager;
 import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.modules.Category;
 import de.peter1337.midnight.modules.Setting;
+import de.peter1337.midnight.utils.ItemType;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.FoodComponent;
-import net.minecraft.component.type.ItemEnchantmentsComponent;
-import net.minecraft.enchantment.Enchantment;
-import net.minecraft.item.*;
-import net.minecraft.item.equipment.EquipmentType;
-import net.minecraft.registry.entry.RegistryEntry;
-import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.screen.PlayerScreenHandler;
-import net.minecraft.screen.ScreenHandler;
-import net.minecraft.registry.tag.TagKey;
-import net.minecraft.registry.Registries;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
 import net.minecraft.client.gui.screen.ingame.InventoryScreen;
+import net.minecraft.screen.PlayerScreenHandler;
 
 import java.util.*;
 
 public class InvManager extends Module {
     private final MinecraftClient mc = MinecraftClient.getInstance();
 
-    public InvManager() {
-        super("InvManager", "Automatically manages your inventory", Category.PLAYER, "y");
-
-        // Initialize default trash items
-        trashItems.add(Items.ROTTEN_FLESH);
-        trashItems.add(Items.POISONOUS_POTATO);
-        trashItems.add(Items.STRING);
-        trashItems.add(Items.SPIDER_EYE);
-        trashItems.add(Items.STICK);
-        trashItems.add(Items.BONE);
-        trashItems.add(Items.GUNPOWDER);
-    }
+    // Simplified tracking to prevent loops
+    private final Map<String, Long> recentOperations = new HashMap<>();
+    private static final long OPERATION_COOLDOWN_MS = 1500; // 1.5 seconds cooldown
 
     // Mode settings
     private final Setting<Boolean> onlyWhenInventoryOpen = register(
@@ -61,81 +45,79 @@ public class InvManager extends Module {
             new Setting<>("SortInventory", Boolean.TRUE, "Sort inventory items (weapons, tools, food, blocks)")
     );
 
-    // Drop duplicates/lower tier settings
-    private final Setting<Boolean> dropDuplicates = register(
-            new Setting<>("DropDuplicates", Boolean.TRUE, "Drop duplicate and lower tier items")
+    // Combined trash and duplicates setting
+    private final Setting<Boolean> cleanInventory = register(
+            new Setting<>("CleanInventory", Boolean.TRUE, "Drop trash items and inferior duplicates")
     );
 
-    // Trash items settings
-    private final Setting<Boolean> dropTrash = register(
-            new Setting<>("DropTrash", Boolean.TRUE, "Drop unwanted items")
+    // Human patterns setting
+    private final Setting<Boolean> humanPatterns = register(
+            new Setting<>("HumanPatterns", Boolean.TRUE, "Mimic human-like interaction patterns")
     );
-
-    // Additional setting for keeping extra tools
-    private final Setting<Integer> keepToolCount = register(
-            new Setting<>("KeepToolCount", 1, 1, 5, "Number of each tool type to keep")
-    );
-
-    // Items that are considered trash and will be dropped if dropTrash is enabled
-    private final List<Item> trashItems = new ArrayList<>();
 
     // Progress tracking
     private long lastActionTime = 0;
     private ActionState currentState = ActionState.IDLE;
 
-    // Item categories for sorting
-    private enum ItemCategory {
-        WEAPON,
-        SWORD, // Specific for swords
-        TOOL,
-        ARMOR,
-        BLOCK,
-        FOOD,
-        TRASH,
-        OTHER
-    }
+    // Fail counter to prevent getting stuck
+    private int consecutiveFailures = 0;
+    private static final int MAX_FAILURES = 5;
 
-    // Material tiers for equipment
-    private enum MaterialTier {
-        NETHERITE(6),
-        DIAMOND(5),
-        IRON(4),
-        GOLDEN(3),
-        STONE(2),
-        WOODEN(1),
-        LEATHER(0),
-        OTHER(0);
-
-        private final int value;
-
-        MaterialTier(int value) {
-            this.value = value;
-        }
-
-        public int getValue() {
-            return value;
-        }
-    }
-
-    // Action states
+    // Action states (simplified by removing dropping duplicates as separate state)
     private enum ActionState {
         IDLE,
         EQUIPPING_ARMOR,
         SORTING_INVENTORY,
-        DROPPING_TRASH,
-        DROPPING_DUPLICATES
+        CLEANING_INVENTORY
     }
 
+    public InvManager() {
+        super("InvManager", "Automatically manages your inventory", Category.PLAYER, "y");
+    }
 
     @Override
     public void onEnable() {
         currentState = ActionState.IDLE;
         lastActionTime = 0;
+        recentOperations.clear();
+        consecutiveFailures = 0;
     }
 
     @Override
     public void onDisable() {
         currentState = ActionState.IDLE;
+        recentOperations.clear();
+    }
+
+    /**
+     * Create a unique identifier for an operation to prevent loops
+     */
+    private String getOperationId(String action, int slot1, int slot2) {
+        return action + ":" + slot1 + ":" + slot2;
+    }
+
+    /**
+     * Check if an operation was performed recently
+     */
+    private boolean isRecentOperation(String operationId) {
+        if (recentOperations.containsKey(operationId)) {
+            return (System.currentTimeMillis() - recentOperations.get(operationId)) < OPERATION_COOLDOWN_MS;
+        }
+        return false;
+    }
+
+    /**
+     * Mark an operation as performed
+     */
+    private void markOperation(String operationId) {
+        recentOperations.put(operationId, System.currentTimeMillis());
+
+        // Clean up old operations occasionally
+        if (recentOperations.size() > 20) {
+            long currentTime = System.currentTimeMillis();
+            recentOperations.entrySet().removeIf(entry ->
+                    currentTime - entry.getValue() > OPERATION_COOLDOWN_MS);
+        }
     }
 
     @Override
@@ -153,7 +135,7 @@ public class InvManager extends Module {
         // Calculate delay
         float actualDelay;
         if (randomDelay.getValue()) {
-            float variation = delay.getValue() * 1.8f;
+            float variation = delay.getValue() * 0.5f;
             actualDelay = delay.getValue() + (float)(Math.random() * variation * 2 - variation);
         } else {
             actualDelay = delay.getValue();
@@ -164,65 +146,122 @@ public class InvManager extends Module {
             return;
         }
 
+        // Handle too many consecutive failures
+        if (consecutiveFailures >= MAX_FAILURES) {
+            // Reset state
+            currentState = ActionState.IDLE;
+            consecutiveFailures = 0;
+            recentOperations.clear();
+            return;
+        }
+
         // Rotate between different tasks
+        boolean actionPerformed = false;
+
         switch (currentState) {
             case IDLE:
                 if (autoArmor.getValue()) {
                     currentState = ActionState.EQUIPPING_ARMOR;
                 } else if (sortInventory.getValue()) {
                     currentState = ActionState.SORTING_INVENTORY;
-                } else if (dropTrash.getValue()) {
-                    currentState = ActionState.DROPPING_TRASH;
-                } else if (dropDuplicates.getValue()) {
-                    currentState = ActionState.DROPPING_DUPLICATES;
+                } else if (cleanInventory.getValue()) {
+                    currentState = ActionState.CLEANING_INVENTORY;
                 }
                 break;
 
             case EQUIPPING_ARMOR:
-                if (equipBestArmor()) {
-                    lastActionTime = currentTime;
-                }
-                if (sortInventory.getValue()) {
-                    currentState = ActionState.SORTING_INVENTORY;
-                } else if (dropTrash.getValue()) {
-                    currentState = ActionState.DROPPING_TRASH;
-                } else if (dropDuplicates.getValue()) {
-                    currentState = ActionState.DROPPING_DUPLICATES;
-                } else {
-                    currentState = ActionState.IDLE;
-                }
+                actionPerformed = equipBestArmor();
+                moveToNextState();
                 break;
 
             case SORTING_INVENTORY:
-                if (sortItems()) {
-                    lastActionTime = currentTime;
-                }
-                if (dropTrash.getValue()) {
-                    currentState = ActionState.DROPPING_TRASH;
-                } else if (dropDuplicates.getValue()) {
-                    currentState = ActionState.DROPPING_DUPLICATES;
-                } else {
-                    currentState = ActionState.IDLE;
-                }
+                actionPerformed = sortItems();
+                moveToNextState();
                 break;
 
-            case DROPPING_TRASH:
-                if (dropTrashItems()) {
-                    lastActionTime = currentTime;
-                }
-                if (dropDuplicates.getValue()) {
-                    currentState = ActionState.DROPPING_DUPLICATES;
-                } else {
-                    currentState = ActionState.IDLE;
-                }
-                break;
-
-            case DROPPING_DUPLICATES:
-                if (dropDuplicateItems()) {
-                    lastActionTime = currentTime;
-                }
+            case CLEANING_INVENTORY:
+                actionPerformed = cleanInventoryItems();
                 currentState = ActionState.IDLE;
                 break;
+        }
+
+        if (actionPerformed) {
+            lastActionTime = currentTime;
+            consecutiveFailures = 0;
+        } else {
+            consecutiveFailures++;
+        }
+    }
+
+    /**
+     * Move to the next state based on enabled settings
+     */
+    private void moveToNextState() {
+        if (sortInventory.getValue() && currentState == ActionState.EQUIPPING_ARMOR) {
+            currentState = ActionState.SORTING_INVENTORY;
+        } else if (cleanInventory.getValue() &&
+                (currentState == ActionState.EQUIPPING_ARMOR || currentState == ActionState.SORTING_INVENTORY)) {
+            currentState = ActionState.CLEANING_INVENTORY;
+        } else {
+            currentState = ActionState.IDLE;
+        }
+    }
+
+    /**
+     * Perform a slot swap with human pattern if enabled
+     */
+    private void performSlotSwap(int sourceSlot, int targetSlot) {
+        if (humanPatterns.getValue()) {
+            // Apply hover delay based on half the delay value
+            long hoverTime = (long)(delay.getValue() * 500); // Half of delay in milliseconds
+
+            // Add some slight randomization to the hover time (±20%)
+            if (randomDelay.getValue()) {
+                float variation = hoverTime * 0.2f;
+                hoverTime += (long)(Math.random() * variation * 2 - variation);
+            }
+
+            if (hoverTime > 0) {
+                try {
+                    Thread.sleep(hoverTime);
+                } catch (InterruptedException e) {
+                    // Ignore
+                }
+            }
+        }
+
+        // Perform the actual swap
+        InventoryManager.swapSlots(sourceSlot, targetSlot);
+    }
+
+    /**
+     * Drops an item with human pattern if enabled
+     */
+    private void performItemDrop(int slotIndex, boolean isStack) {
+        if (humanPatterns.getValue()) {
+            // Apply hover delay based on half the delay value
+            long hoverTime = (long)(delay.getValue() * 500); // Half of delay in milliseconds
+
+            // Add some slight randomization to the hover time (±20%)
+            if (randomDelay.getValue()) {
+                float variation = hoverTime * 0.2f;
+                hoverTime += (long)(Math.random() * variation * 2 - variation);
+            }
+
+            if (hoverTime > 0) {
+                try {
+                    Thread.sleep(hoverTime);
+                } catch (InterruptedException e) {
+                    // Ignore
+                }
+            }
+        }
+
+        // Perform the drop
+        if (isStack) {
+            InventoryManager.dropItemStack(slotIndex);
+        } else {
+            InventoryManager.dropItem(slotIndex);
         }
     }
 
@@ -253,11 +292,10 @@ public class InvManager extends Module {
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (stack.isEmpty()) continue;
 
-            // In 1.21.4, we need to check for equipment type rather than directly instanceof ArmorItem
-            EquipmentSlot equipmentSlot = getArmorEquipmentSlot(stack);
+            EquipmentSlot equipmentSlot = InventoryManager.getArmorEquipmentSlot(stack);
             if (equipmentSlot == null) continue;
 
-            float armorValue = calculateArmorValue(stack);
+            float armorValue = InventoryManager.calculateArmorValue(stack);
 
             if (armorValue > bestArmorValues.get(equipmentSlot)) {
                 bestArmorValues.put(equipmentSlot, armorValue);
@@ -273,142 +311,30 @@ public class InvManager extends Module {
             if (slotIndex == -1) continue;
 
             // Get currently equipped item
-            ItemStack equippedItem = getEquippedArmorItem(slot);
+            ItemStack equippedItem = InventoryManager.getEquippedArmorItem(slot);
+            ItemStack newItem = mc.player.getInventory().getStack(slotIndex);
 
             // If no item is equipped or found item is better
-            if (equippedItem.isEmpty() || calculateArmorValue(equippedItem) < bestArmorValues.get(slot)) {
+            if (equippedItem.isEmpty() || InventoryManager.calculateArmorValue(equippedItem) < bestArmorValues.get(slot)) {
                 // Find the actual inventory slot index
                 int actualSlot = slotIndex < 9 ? slotIndex + 36 : slotIndex;
-
                 // Get the target slot (where armor goes in the armor slots)
-                int targetSlot = getArmorSlotIndex(slot);
+                int targetSlot = InventoryManager.getArmorSlotIndex(slot);
 
-                // Perform the swap
-                swapSlots(actualSlot, targetSlot);
+                // Check if we recently did this operation
+                String operationId = getOperationId("armor", actualSlot, targetSlot);
+                if (isRecentOperation(operationId)) continue;
+
+                // Mark this operation
+                markOperation(operationId);
+
+                // Perform the swap with human patterns
+                performSlotSwap(actualSlot, targetSlot);
                 return true;
             }
         }
 
         return false;
-    }
-
-    /**
-     * Determines which equipment slot an item belongs to
-     */
-    private EquipmentSlot getArmorEquipmentSlot(ItemStack stack) {
-        // Check if the stack has an equippable component
-        if (stack.contains(DataComponentTypes.EQUIPPABLE)) {
-            // Get the equipment slot from the equippable component
-            return stack.getComponents().get(DataComponentTypes.EQUIPPABLE).slot();
-        }
-        return null;
-    }
-
-    /**
-     * Gets the currently equipped armor item in the specified slot
-     */
-    private ItemStack getEquippedArmorItem(EquipmentSlot slot) {
-        switch (slot) {
-            case HEAD:
-                return mc.player.getInventory().getArmorStack(3);
-            case CHEST:
-                return mc.player.getInventory().getArmorStack(2);
-            case LEGS:
-                return mc.player.getInventory().getArmorStack(1);
-            case FEET:
-                return mc.player.getInventory().getArmorStack(0);
-            default:
-                return ItemStack.EMPTY;
-        }
-    }
-
-    /**
-     * Gets the actual slot index for a given armor equipment slot
-     */
-    private int getArmorSlotIndex(EquipmentSlot slot) {
-        switch (slot) {
-            case HEAD:
-                return 5;  // Helmet slot
-            case CHEST:
-                return 6;  // Chestplate slot
-            case LEGS:
-                return 7;  // Leggings slot
-            case FEET:
-                return 8;  // Boots slot
-            default:
-                return -1;
-        }
-    }
-
-    /**
-     * Calculates the value of an armor piece considering its material, enchantments, etc.
-     */
-    private float calculateArmorValue(ItemStack stack) {
-        if (stack.isEmpty()) return 0.0f;
-
-        // Start with the base material tier value (this will prioritize diamond over iron, etc.)
-        float value = getMaterialTier(stack).getValue() * 100.0f;
-
-        // In 1.21.4, armor values are in the attribute modifiers component
-        if (stack.contains(DataComponentTypes.ATTRIBUTE_MODIFIERS)) {
-            // Add a base value for having attribute modifiers
-            value += 20.0f;
-        }
-
-        // Add value for enchantments
-        ItemEnchantmentsComponent enchantments = stack.getEnchantments();
-        if (enchantments != null && !enchantments.isEmpty()) {
-            // Each enchantment adds value based on level
-            value += enchantments.getSize() * 10.0f;
-
-            // Extra value for protection enchantments
-            if (hasProtectionEnchantment(stack)) {
-                value += 15.0f;
-            }
-        }
-
-        return value;
-    }
-
-    /**
-     * Check if an item stack has any protection enchantment
-     */
-    /**
-     * Simplified version that doesn't require registry access
-     */
-    private boolean hasProtectionEnchantment(ItemStack stack) {
-        ItemEnchantmentsComponent enchantments = stack.getEnchantments();
-        if (enchantments == null || enchantments.isEmpty()) return false;
-
-        // In Minecraft 1.21.4, we'll check by using the string representation
-        // of each enchantment entry to look for protection-related enchantments
-        for (RegistryEntry<Enchantment> entry : enchantments.getEnchantments()) {
-            // Convert the entry to string and check if it contains "protection"
-            String enchantmentString = entry.toString().toLowerCase();
-            if (enchantmentString.contains("protection")) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Gets the material tier of an item
-     */
-    private MaterialTier getMaterialTier(ItemStack stack) {
-        Item item = stack.getItem();
-        String itemId = Registries.ITEM.getId(item).toString();
-
-        if (itemId.contains("netherite")) return MaterialTier.NETHERITE;
-        if (itemId.contains("diamond")) return MaterialTier.DIAMOND;
-        if (itemId.contains("iron")) return MaterialTier.IRON;
-        if (itemId.contains("golden") || itemId.contains("gold")) return MaterialTier.GOLDEN;
-        if (itemId.contains("stone")) return MaterialTier.STONE;
-        if (itemId.contains("wooden") || itemId.contains("wood")) return MaterialTier.WOODEN;
-        if (itemId.contains("leather")) return MaterialTier.LEATHER;
-
-        return MaterialTier.OTHER;
     }
 
     /**
@@ -419,10 +345,10 @@ public class InvManager extends Module {
         if (!sortInventory.getValue() || mc.player == null) return false;
 
         // Scan inventory and categorize items
-        Map<ItemCategory, List<SortableItem>> categorizedItems = new HashMap<>();
+        Map<ItemType.Category, List<SortableItem>> categorizedItems = new HashMap<>();
 
         // Initialize categories
-        for (ItemCategory category : ItemCategory.values()) {
+        for (ItemType.Category category : ItemType.Category.values()) {
             categorizedItems.put(category, new ArrayList<>());
         }
 
@@ -431,61 +357,61 @@ public class InvManager extends Module {
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (stack.isEmpty()) continue;
 
-            ItemCategory category = categorizeItem(stack);
-
-            // Special case for swords - separate from other weapons
-            if (category == ItemCategory.WEAPON && isSword(stack)) {
-                category = ItemCategory.SWORD;
-            }
-
+            ItemType.Category category = ItemType.categorizeItem(stack);
             SortableItem sortableItem = new SortableItem(i, stack, category);
             categorizedItems.get(category).add(sortableItem);
         }
 
         // Sort each category
-        for (ItemCategory category : ItemCategory.values()) {
+        for (ItemType.Category category : ItemType.Category.values()) {
             List<SortableItem> items = categorizedItems.get(category);
 
-            if (category == ItemCategory.SWORD) {
+            if (category == ItemType.Category.SWORD) {
                 // Sort swords by tier and enchantments, best first
                 items.sort(Comparator
-                        .comparing((SortableItem item) -> getMaterialTier(item.stack).getValue())
-                        .thenComparing(item -> calculateEnchantmentValue(item.stack))
+                        .comparing((SortableItem item) -> ItemType.getMaterialTier(item.stack).getValue())
+                        .thenComparing(item -> InventoryManager.calculateEnchantmentValue(item.stack))
                         .reversed());
-            } else if (category == ItemCategory.WEAPON) {
+            } else if (category == ItemType.Category.WEAPON) {
                 // Sort other weapons
                 items.sort(Comparator
-                        .comparing((SortableItem item) -> getMaterialTier(item.stack).getValue())
-                        .thenComparing(item -> calculateEnchantmentValue(item.stack))
+                        .comparing((SortableItem item) -> ItemType.getMaterialTier(item.stack).getValue())
+                        .thenComparing(item -> InventoryManager.calculateEnchantmentValue(item.stack))
                         .reversed());
-            } else if (category == ItemCategory.TOOL) {
+            } else if (category == ItemType.Category.TOOL) {
                 // Sort tools by tier
                 items.sort(Comparator
-                        .comparing((SortableItem item) -> getMaterialTier(item.stack).getValue())
+                        .comparing((SortableItem item) -> ItemType.getMaterialTier(item.stack).getValue())
                         .reversed());
-            } else if (category == ItemCategory.FOOD) {
+            } else if (category == ItemType.Category.FOOD) {
                 // Sort food by saturation/hunger value
                 items.sort(Comparator
-                        .comparing((SortableItem item) -> calculateFoodValue(item.stack))
+                        .comparing((SortableItem item) -> InventoryManager.calculateFoodValue(item.stack))
                         .reversed());
             }
         }
 
         // Place best sword in slot 0
-        List<SortableItem> swords = categorizedItems.get(ItemCategory.SWORD);
+        List<SortableItem> swords = categorizedItems.get(ItemType.Category.SWORD);
         if (!swords.isEmpty()) {
             SortableItem bestSword = swords.get(0);
             int sourceSlot = bestSword.slotIndex < 9 ? bestSword.slotIndex + 36 : bestSword.slotIndex;
             int targetSlot = 36; // Hotbar slot 0
 
+            // Skip if already in the right slot
             if (sourceSlot != targetSlot) {
-                swapSlots(sourceSlot, targetSlot);
-                return true;
+                // Check if we recently did this operation
+                String operationId = getOperationId("sword", sourceSlot, targetSlot);
+                if (!isRecentOperation(operationId)) {
+                    markOperation(operationId);
+                    performSlotSwap(sourceSlot, targetSlot);
+                    return true;
+                }
             }
         }
 
         // Sort rest of weapons to hotbar (1-2)
-        List<SortableItem> weapons = new ArrayList<>(categorizedItems.get(ItemCategory.WEAPON));
+        List<SortableItem> weapons = new ArrayList<>(categorizedItems.get(ItemType.Category.WEAPON));
         for (int i = 0; i < Math.min(2, weapons.size()); i++) {
             int sourceSlot = weapons.get(i).slotIndex;
             int targetSlot = i + 1;
@@ -494,14 +420,20 @@ public class InvManager extends Module {
             sourceSlot = sourceSlot < 9 ? sourceSlot + 36 : sourceSlot;
             targetSlot = targetSlot + 36;
 
+            // Skip if already in the right slot
             if (sourceSlot != targetSlot) {
-                swapSlots(sourceSlot, targetSlot);
-                return true;
+                // Check if we recently did this operation
+                String operationId = getOperationId("weapon", sourceSlot, targetSlot);
+                if (!isRecentOperation(operationId)) {
+                    markOperation(operationId);
+                    performSlotSwap(sourceSlot, targetSlot);
+                    return true;
+                }
             }
         }
 
         // Sort tools to hotbar (3-5)
-        List<SortableItem> tools = categorizedItems.get(ItemCategory.TOOL);
+        List<SortableItem> tools = categorizedItems.get(ItemType.Category.TOOL);
         for (int i = 0; i < Math.min(3, tools.size()); i++) {
             int sourceSlot = tools.get(i).slotIndex;
             int targetSlot = i + 3;
@@ -510,14 +442,20 @@ public class InvManager extends Module {
             sourceSlot = sourceSlot < 9 ? sourceSlot + 36 : sourceSlot;
             targetSlot = targetSlot + 36;
 
+            // Skip if already in the right slot
             if (sourceSlot != targetSlot) {
-                swapSlots(sourceSlot, targetSlot);
-                return true;
+                // Check if we recently did this operation
+                String operationId = getOperationId("tool", sourceSlot, targetSlot);
+                if (!isRecentOperation(operationId)) {
+                    markOperation(operationId);
+                    performSlotSwap(sourceSlot, targetSlot);
+                    return true;
+                }
             }
         }
 
         // Sort blocks to hotbar (6-7)
-        List<SortableItem> blocks = categorizedItems.get(ItemCategory.BLOCK);
+        List<SortableItem> blocks = categorizedItems.get(ItemType.Category.BLOCK);
         for (int i = 0; i < Math.min(2, blocks.size()); i++) {
             int sourceSlot = blocks.get(i).slotIndex;
             int targetSlot = i + 6;
@@ -526,14 +464,20 @@ public class InvManager extends Module {
             sourceSlot = sourceSlot < 9 ? sourceSlot + 36 : sourceSlot;
             targetSlot = targetSlot + 36;
 
+            // Skip if already in the right slot
             if (sourceSlot != targetSlot) {
-                swapSlots(sourceSlot, targetSlot);
-                return true;
+                // Check if we recently did this operation
+                String operationId = getOperationId("block", sourceSlot, targetSlot);
+                if (!isRecentOperation(operationId)) {
+                    markOperation(operationId);
+                    performSlotSwap(sourceSlot, targetSlot);
+                    return true;
+                }
             }
         }
 
         // Sort food to hotbar (8)
-        List<SortableItem> foods = categorizedItems.get(ItemCategory.FOOD);
+        List<SortableItem> foods = categorizedItems.get(ItemType.Category.FOOD);
         if (!foods.isEmpty()) {
             int sourceSlot = foods.get(0).slotIndex;
             int targetSlot = 8;
@@ -542,9 +486,15 @@ public class InvManager extends Module {
             sourceSlot = sourceSlot < 9 ? sourceSlot + 36 : sourceSlot;
             targetSlot = targetSlot + 36;
 
+            // Skip if already in the right slot
             if (sourceSlot != targetSlot) {
-                swapSlots(sourceSlot, targetSlot);
-                return true;
+                // Check if we recently did this operation
+                String operationId = getOperationId("food", sourceSlot, targetSlot);
+                if (!isRecentOperation(operationId)) {
+                    markOperation(operationId);
+                    performSlotSwap(sourceSlot, targetSlot);
+                    return true;
+                }
             }
         }
 
@@ -552,346 +502,183 @@ public class InvManager extends Module {
     }
 
     /**
-     * Drops items that are considered trash
+     * Cleans inventory by dropping trash items and duplicates
      * @return true if an action was performed
      */
-    private boolean dropTrashItems() {
-        if (!dropTrash.getValue() || mc.player == null) return false;
+    private boolean cleanInventoryItems() {
+        if (!cleanInventory.getValue() || mc.player == null) return false;
 
+        // Calculate precise delay
+        float actualDelay;
+        if (randomDelay.getValue()) {
+            float variation = delay.getValue() * 0.5f;
+            actualDelay = delay.getValue() + (float)(Math.random() * variation * 2 - variation);
+        } else {
+            actualDelay = delay.getValue();
+        }
+
+        // First, immediately drop any trash items
         for (int i = 0; i < mc.player.getInventory().size(); i++) {
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (stack.isEmpty()) continue;
 
-            if (isTrashItem(stack)) {
-                // Convert inventory index to container slot index
+            // Prioritize dropping trash items immediately
+            if (ItemType.isTrashItem(stack.getItem())) {
                 int slotIndex = i < 9 ? i + 36 : i;
 
-                // Drop the item (Q button behavior)
-                mc.interactionManager.clickSlot(
-                        mc.player.currentScreenHandler.syncId,
-                        slotIndex,
-                        0,
-                        SlotActionType.THROW,
-                        mc.player
-                );
+                // Check if we recently tried to drop this item
+                String operationId = getOperationId("trash", slotIndex, 0);
+                if (isRecentOperation(operationId)) continue;
+
+                // Mark operation
+                markOperation(operationId);
+
+                // Drop with human patterns
+                performItemDrop(slotIndex, stack.getCount() > 1);
                 return true;
             }
         }
-
-        return false;
-    }
-
-    /**
-     * Drops duplicate items and lower tier items of the same type
-     * @return true if an action was performed
-     */
-    private boolean dropDuplicateItems() {
-        if (!dropDuplicates.getValue() || mc.player == null) return false;
 
         // Maps to track the best items by category and type
         Map<String, ItemStack> bestTools = new HashMap<>();
         Map<String, ItemStack> bestWeapons = new HashMap<>();
-        Map<String, Integer> toolCounts = new HashMap<>();
+        Map<EquipmentSlot, ItemStack> bestArmor = new HashMap<>();
 
-        // First pass: find best items of each type
+        // Initialize armor slots
+        bestArmor.put(EquipmentSlot.HEAD, null);
+        bestArmor.put(EquipmentSlot.CHEST, null);
+        bestArmor.put(EquipmentSlot.LEGS, null);
+        bestArmor.put(EquipmentSlot.FEET, null);
+
+        // First pass: find best items
         for (int i = 0; i < mc.player.getInventory().size(); i++) {
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (stack.isEmpty()) continue;
 
-            ItemCategory category = categorizeItem(stack);
+            ItemType.Category category = ItemType.categorizeItem(stack);
 
-            if (category == ItemCategory.TOOL) {
-                String toolType = getToolType(stack);
+            // Skip trash items as they're already handled
+            if (ItemType.isTrashItem(stack.getItem())) continue;
+
+            // Find best tools
+            if (category == ItemType.Category.TOOL) {
+                String toolType = ItemType.getToolType(stack).name();
                 ItemStack currentBest = bestTools.get(toolType);
 
-                if (currentBest == null || compareItems(stack, currentBest) > 0) {
+                if (currentBest == null || InventoryManager.compareItems(stack, currentBest) > 0) {
                     bestTools.put(toolType, stack);
                 }
-
-                // Count this tool
-                toolCounts.put(toolType, toolCounts.getOrDefault(toolType, 0) + 1);
             }
-            else if (category == ItemCategory.WEAPON || category == ItemCategory.SWORD) {
-                String weaponType = getWeaponType(stack);
+            // Find best weapons
+            else if (category == ItemType.Category.WEAPON || category == ItemType.Category.SWORD) {
+                String weaponType = ItemType.getWeaponType(stack).name();
                 ItemStack currentBest = bestWeapons.get(weaponType);
 
-                if (currentBest == null || compareItems(stack, currentBest) > 0) {
+                if (currentBest == null || InventoryManager.compareItems(stack, currentBest) > 0) {
                     bestWeapons.put(weaponType, stack);
+                }
+            }
+            // Find best armor
+            else if (category == ItemType.Category.ARMOR) {
+                EquipmentSlot slot = InventoryManager.getArmorEquipmentSlot(stack);
+                if (slot != null) {
+                    ItemStack currentBest = bestArmor.get(slot);
+
+                    if (currentBest == null || InventoryManager.calculateArmorValue(stack) >
+                            InventoryManager.calculateArmorValue(currentBest)) {
+                        bestArmor.put(slot, stack);
+                    }
                 }
             }
         }
 
-        // Second pass: drop duplicates and lower tier items
+        // Add currently equipped armor to the best armor map
+        for (EquipmentSlot slot : new EquipmentSlot[]{EquipmentSlot.HEAD, EquipmentSlot.CHEST,
+                EquipmentSlot.LEGS, EquipmentSlot.FEET}) {
+            ItemStack equippedItem = InventoryManager.getEquippedArmorItem(slot);
+            if (!equippedItem.isEmpty()) {
+                ItemStack currentBest = bestArmor.get(slot);
+
+                if (currentBest == null || InventoryManager.calculateArmorValue(equippedItem) >
+                        InventoryManager.calculateArmorValue(currentBest)) {
+                    bestArmor.put(slot, equippedItem);
+                }
+            }
+        }
+
+        // Second pass: drop duplicate/inferior items
         for (int i = 0; i < mc.player.getInventory().size(); i++) {
             ItemStack stack = mc.player.getInventory().getStack(i);
             if (stack.isEmpty()) continue;
 
-            ItemCategory category = categorizeItem(stack);
+            // Skip trash items as they're already handled
+            if (ItemType.isTrashItem(stack.getItem())) continue;
 
-            if (category == ItemCategory.TOOL) {
-                String toolType = getToolType(stack);
+            ItemType.Category category = ItemType.categorizeItem(stack);
+            int slotIndex = i < 9 ? i + 36 : i;
+
+            if (category == ItemType.Category.TOOL) {
+                String toolType = ItemType.getToolType(stack).name();
                 ItemStack bestTool = bestTools.get(toolType);
-                int count = toolCounts.getOrDefault(toolType, 0);
 
-                // If we have more of this tool than we want to keep and this isn't the best one
-                if (count > keepToolCount.getValue() && compareItems(stack, bestTool) < 0) {
-                    // Convert inventory index to container slot index
-                    int slotIndex = i < 9 ? i + 36 : i;
+                // If this isn't the best tool of its type
+                if (InventoryManager.compareItems(stack, bestTool) < 0) {
+                    // Check if we recently tried to drop this item
+                    String operationId = getOperationId("dupTool", slotIndex, 0);
+                    if (isRecentOperation(operationId)) continue;
 
-                    // Drop the item
-                    mc.interactionManager.clickSlot(
-                            mc.player.currentScreenHandler.syncId,
-                            slotIndex,
-                            0,
-                            SlotActionType.THROW,
-                            mc.player
-                    );
+                    // Mark operation
+                    markOperation(operationId);
 
-                    // Decrement the count
-                    toolCounts.put(toolType, count - 1);
+                    // Drop with human patterns
+                    performItemDrop(slotIndex, stack.getCount() > 1);
                     return true;
                 }
             }
-            else if (category == ItemCategory.WEAPON || category == ItemCategory.SWORD) {
-                String weaponType = getWeaponType(stack);
+            else if (category == ItemType.Category.WEAPON || category == ItemType.Category.SWORD) {
+                String weaponType = ItemType.getWeaponType(stack).name();
                 ItemStack bestWeapon = bestWeapons.get(weaponType);
 
                 // If this is not the best weapon of its type
-                if (compareItems(stack, bestWeapon) < 0) {
-                    // Convert inventory index to container slot index
-                    int slotIndex = i < 9 ? i + 36 : i;
+                if (InventoryManager.compareItems(stack, bestWeapon) < 0) {
+                    // Check if we recently tried to drop this item
+                    String operationId = getOperationId("dupWeapon", slotIndex, 0);
+                    if (isRecentOperation(operationId)) continue;
 
-                    // Drop the item
-                    mc.interactionManager.clickSlot(
-                            mc.player.currentScreenHandler.syncId,
-                            slotIndex,
-                            0,
-                            SlotActionType.THROW,
-                            mc.player
-                    );
+                    // Mark operation
+                    markOperation(operationId);
+
+                    // Drop with human patterns
+                    performItemDrop(slotIndex, stack.getCount() > 1);
                     return true;
+                }
+            }
+            else if (category == ItemType.Category.ARMOR) {
+                EquipmentSlot slot = InventoryManager.getArmorEquipmentSlot(stack);
+                if (slot != null) {
+                    ItemStack bestArmorPiece = bestArmor.get(slot);
+
+                    // If this isn't the best armor piece for this slot
+                    if (bestArmorPiece != null && !ItemStack.areEqual(stack, bestArmorPiece) &&
+                            InventoryManager.calculateArmorValue(stack) <
+                                    InventoryManager.calculateArmorValue(bestArmorPiece)) {
+
+                        // Check if we recently tried to drop this item
+                        String operationId = getOperationId("dupArmor", slotIndex, 0);
+                        if (isRecentOperation(operationId)) continue;
+
+                        // Mark operation
+                        markOperation(operationId);
+
+                        // Drop with human patterns
+                        performItemDrop(slotIndex, stack.getCount() > 1);
+                        return true;
+                    }
                 }
             }
         }
 
         return false;
-    }
-
-    /**
-     * Compare two items for sorting purposes
-     * @return positive if first is better, negative if second is better, 0 if equal
-     */
-    private int compareItems(ItemStack stack1, ItemStack stack2) {
-        // First compare material tier
-        int tierDiff = getMaterialTier(stack1).getValue() - getMaterialTier(stack2).getValue();
-        if (tierDiff != 0) return tierDiff;
-
-        // Then compare enchantment value
-        return Float.compare(calculateEnchantmentValue(stack1), calculateEnchantmentValue(stack2));
-    }
-
-    /**
-     * Calculate a value representing the enchantment quality of an item
-     */
-    private float calculateEnchantmentValue(ItemStack stack) {
-        ItemEnchantmentsComponent enchantments = stack.getEnchantments();
-        if (enchantments == null || enchantments.isEmpty()) return 0;
-
-        // Simple algorithm: count the number of enchantments
-        return enchantments.getSize() * 10.0f;
-    }
-
-    /**
-     * Calculate food value based on hunger and saturation
-     */
-    private float calculateFoodValue(ItemStack stack) {
-        if (!stack.contains(DataComponentTypes.FOOD)) return 0;
-
-        FoodComponent foodComp = stack.getComponents().get(DataComponentTypes.FOOD);
-        return foodComp.nutrition() + foodComp.saturation();
-    }
-
-    /**
-     * Gets the tool type as a string identifier (pickaxe, axe, etc.)
-     */
-    private String getToolType(ItemStack stack) {
-        String itemId = Registries.ITEM.getId(stack.getItem()).toString();
-
-        if (itemId.contains("pickaxe")) return "pickaxe";
-        if (itemId.contains("axe") && !itemId.contains("pickaxe")) return "axe";
-        if (itemId.contains("shovel")) return "shovel";
-        if (itemId.contains("hoe")) return "hoe";
-
-        return itemId; // Fallback to the full id
-    }
-
-    /**
-     * Gets the weapon type as a string identifier (sword, bow, etc.)
-     */
-    private String getWeaponType(ItemStack stack) {
-        String itemId = Registries.ITEM.getId(stack.getItem()).toString();
-
-        if (itemId.contains("sword")) return "sword";
-        if (itemId.contains("bow") && !itemId.contains("crossbow")) return "bow";
-        if (itemId.contains("crossbow")) return "crossbow";
-        if (itemId.contains("trident")) return "trident";
-
-        return itemId; // Fallback to the full id
-    }
-
-    /**
-     * Determines if an item is considered trash
-     */
-    private boolean isTrashItem(ItemStack stack) {
-        return trashItems.contains(stack.getItem());
-    }
-
-    /**
-     * Categorizes an item
-     */
-    private ItemCategory categorizeItem(ItemStack stack) {
-        Item item = stack.getItem();
-
-        // In 1.21.4, we need to check component types rather than instanceof
-        if (isWeapon(stack)) {
-            return ItemCategory.WEAPON;
-        } else if (isTool(stack)) {
-            return ItemCategory.TOOL;
-        } else if (isArmor(stack)) {
-            return ItemCategory.ARMOR;
-        } else if (item instanceof BlockItem) {
-            return ItemCategory.BLOCK;
-        } else if (hasFood(stack)) {
-            return ItemCategory.FOOD;
-        } else if (isTrashItem(stack)) {
-            return ItemCategory.TRASH;
-        } else {
-            return ItemCategory.OTHER;
-        }
-    }
-
-    /**
-     * Checks if an item is a weapon
-     */
-    private boolean isWeapon(ItemStack stack) {
-        Item item = stack.getItem();
-        // Check for weapons using identifiers since instanceof is no longer reliable
-        return item == Items.WOODEN_SWORD ||
-                item == Items.STONE_SWORD ||
-                item == Items.IRON_SWORD ||
-                item == Items.GOLDEN_SWORD ||
-                item == Items.DIAMOND_SWORD ||
-                item == Items.NETHERITE_SWORD ||
-                item == Items.BOW ||
-                item == Items.CROSSBOW ||
-                item == Items.TRIDENT;
-    }
-
-    /**
-     * Checks if an item is specifically a sword
-     */
-    private boolean isSword(ItemStack stack) {
-        Item item = stack.getItem();
-        return item == Items.WOODEN_SWORD ||
-                item == Items.STONE_SWORD ||
-                item == Items.IRON_SWORD ||
-                item == Items.GOLDEN_SWORD ||
-                item == Items.DIAMOND_SWORD ||
-                item == Items.NETHERITE_SWORD;
-    }
-
-    /**
-     * Checks if an item is a tool
-     * For Minecraft 1.21.4, we identify tools by comparing against specific Items instances
-     */
-    private boolean isTool(ItemStack stack) {
-        Item item = stack.getItem();
-        // Check for tools by comparing with known tool items
-        return item == Items.WOODEN_PICKAXE ||
-                item == Items.STONE_PICKAXE ||
-                item == Items.IRON_PICKAXE ||
-                item == Items.GOLDEN_PICKAXE ||
-                item == Items.DIAMOND_PICKAXE ||
-                item == Items.NETHERITE_PICKAXE ||
-                item == Items.WOODEN_AXE ||
-                item == Items.STONE_AXE ||
-                item == Items.IRON_AXE ||
-                item == Items.GOLDEN_AXE ||
-                item == Items.DIAMOND_AXE ||
-                item == Items.NETHERITE_AXE ||
-                item == Items.WOODEN_SHOVEL ||
-                item == Items.STONE_SHOVEL ||
-                item == Items.IRON_SHOVEL ||
-                item == Items.GOLDEN_SHOVEL ||
-                item == Items.DIAMOND_SHOVEL ||
-                item == Items.NETHERITE_SHOVEL ||
-                item == Items.WOODEN_HOE ||
-                item == Items.STONE_HOE ||
-                item == Items.IRON_HOE ||
-                item == Items.GOLDEN_HOE ||
-                item == Items.DIAMOND_HOE ||
-                item == Items.NETHERITE_HOE ||
-                item == Items.SHEARS ||
-                item == Items.FLINT_AND_STEEL;
-    }
-
-    /**
-     * Checks if an item is armor
-     */
-    private boolean isArmor(ItemStack stack) {
-        // Check if the stack has an equippable component with an armor slot
-        if (stack.contains(DataComponentTypes.EQUIPPABLE)) {
-            EquipmentSlot slot = stack.getComponents().get(DataComponentTypes.EQUIPPABLE).slot();
-            return slot == EquipmentSlot.HEAD ||
-                    slot == EquipmentSlot.CHEST ||
-                    slot == EquipmentSlot.LEGS ||
-                    slot == EquipmentSlot.FEET;
-        }
-
-        // Fallback: check item ID for armor keywords
-        String itemId = Registries.ITEM.getId(stack.getItem()).toString().toLowerCase();
-        return itemId.contains("helmet") ||
-                itemId.contains("chestplate") ||
-                itemId.contains("leggings") ||
-                itemId.contains("boots");
-    }
-
-    /**
-     * Checks if an item is food
-     */
-    private boolean hasFood(ItemStack stack) {
-        // Check if the item has a food component
-        return stack.contains(DataComponentTypes.FOOD);
-    }
-
-    /**
-     * Swaps items between two slots
-     */
-    private void swapSlots(int slot1, int slot2) {
-        mc.interactionManager.clickSlot(
-                mc.player.currentScreenHandler.syncId,
-                slot1,
-                0,
-                SlotActionType.PICKUP,
-                mc.player
-        );
-
-        mc.interactionManager.clickSlot(
-                mc.player.currentScreenHandler.syncId,
-                slot2,
-                0,
-                SlotActionType.PICKUP,
-                mc.player
-        );
-
-        // If there's still an item on cursor (from slot1), put it back
-        mc.interactionManager.clickSlot(
-                mc.player.currentScreenHandler.syncId,
-                slot1,
-                0,
-                SlotActionType.PICKUP,
-                mc.player
-        );
     }
 
     /**
@@ -900,9 +687,9 @@ public class InvManager extends Module {
     private class SortableItem {
         public final int slotIndex;
         public final ItemStack stack;
-        public final ItemCategory category;
+        public final ItemType.Category category;
 
-        public SortableItem(int slotIndex, ItemStack stack, ItemCategory category) {
+        public SortableItem(int slotIndex, ItemStack stack, ItemType.Category category) {
             this.slotIndex = slotIndex;
             this.stack = stack;
             this.category = category;
@@ -913,60 +700,20 @@ public class InvManager extends Module {
      * Adds an item to the trash list
      */
     public void addTrashItem(Item item) {
-        if (!trashItems.contains(item)) {
-            trashItems.add(item);
-        }
+        ItemType.addTrashItem(item);
     }
 
     /**
      * Removes an item from the trash list
      */
     public void removeTrashItem(Item item) {
-        trashItems.remove(item);
+        ItemType.removeTrashItem(item);
     }
 
     /**
      * Clears the trash list
      */
     public void clearTrashItems() {
-        trashItems.clear();
-    }
-
-    /**
-     * Helper method to get display information about items in the inventory
-     * Can be used for debugging
-     */
-    public String getInventoryStatus() {
-        StringBuilder status = new StringBuilder();
-
-        // Count equipped armor pieces
-        status.append("Equipped Armor:\n");
-        for (EquipmentSlot slot : new EquipmentSlot[]{EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET}) {
-            ItemStack armorStack = getEquippedArmorItem(slot);
-            status.append("  ").append(slot.name()).append(": ");
-            if (!armorStack.isEmpty()) {
-                status.append(armorStack.getItem().toString())
-                        .append(" (Tier: ").append(getMaterialTier(armorStack))
-                        .append(", Value: ").append(calculateArmorValue(armorStack)).append(")\n");
-            } else {
-                status.append("Empty\n");
-            }
-        }
-
-        // List hotbar items
-        status.append("\nHotbar Items:\n");
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
-            status.append("  Slot ").append(i).append(": ");
-            if (!stack.isEmpty()) {
-                ItemCategory category = categorizeItem(stack);
-                status.append(stack.getItem().toString())
-                        .append(" (").append(category).append(")\n");
-            } else {
-                status.append("Empty\n");
-            }
-        }
-
-        return status.toString();
+        ItemType.clearTrashItems();
     }
 }

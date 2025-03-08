@@ -1,16 +1,19 @@
 {
 	"required": true,
+	"minVersion": "0.8",
 	"package": "de.peter1337.midnight.mixins",
-	"compatibilityLevel": "JAVA_21",
-	"mixins": [
+	"compatibilityLevel": "JAVA_17",
+	"client": [
+		"AdvancementMixin",
 		"ChatMixin",
-		"EntityGlowingMixin",
 		"ChatScreenAccessor",
+		"EntityGlowingMixin",
+		"PlayerVelocityMixin",
+		"StatusEffectHudMixin",
+		"SystemMessageMixin",
 		"TitleScreenMixin",
 		"ToastMixin",
-		"AdvancementMixin",
-		"SystemMessageMixin",
-		"StatusEffectHudMixin"
+		"VelocityMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

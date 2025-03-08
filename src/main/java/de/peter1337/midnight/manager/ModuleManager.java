@@ -4,6 +4,7 @@ import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.modules.movement.Sprint;
 import de.peter1337.midnight.modules.player.InvManager;
 import de.peter1337.midnight.modules.player.Stealer;
+import de.peter1337.midnight.modules.player.Velocity;
 import de.peter1337.midnight.modules.render.ClickGuiModule;
 import de.peter1337.midnight.modules.render.ESP;
 import de.peter1337.midnight.modules.misc.NotificationBlocker;
@@ -22,6 +23,7 @@ public class ModuleManager {
         registerModule(new Stealer());
         registerModule(new NotificationBlocker());
         registerModule(new InvManager());
+        registerModule(new Velocity());
     }
 
     private static void registerModule(Module module) {
