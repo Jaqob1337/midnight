@@ -453,6 +453,15 @@ public class RotationHandler {
     }
 
     /**
+     * Determines if model rotations should be skipped
+     * Used to prevent rotations in first-person view
+     */
+    public static boolean shouldSkipModelRotations() {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        return mc != null && mc.options.getPerspective().isFirstPerson();
+    }
+
+    /**
      * Data class to hold current rotation state for callbacks
      */
     public static class RotationState {

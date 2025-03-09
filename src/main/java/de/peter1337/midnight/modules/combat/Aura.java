@@ -63,7 +63,7 @@ public class Aura extends Module {
 
     private final Setting<String> rotationMode = register(
             new Setting<>("RotationMode", "Silent",
-                    List.of("Silent", "Client", "Body"),
+                    List.of("Silent", "Client"),
                     "Silent: server-only, Client: visible, Body: shows on body only")
     );
 
@@ -91,6 +91,7 @@ public class Aura extends Module {
             new Setting<>("FOVCheck", 180f, 30f, 360f, "Field of view angle for target visibility")
     );
 
+    // Properties to track state
     private long lastAttackTime = 0;
     private boolean rotating = false;
     private float originalYaw;
@@ -159,8 +160,8 @@ public class Aura extends Module {
         // If we have targets, handle rotations and attacks
         if (!targetEntities.isEmpty() && primaryTarget != null) {
             // Check attack cooldown if smart attack enabled
-            boolean cooldownReady = !smartAttack.getValue() ||
-                    (mc.player.getAttackCooldownProgress(0.0f) >= 0.9f);
+            float cooldownProgress = mc.player.getAttackCooldownProgress(0.0f);
+            boolean cooldownReady = !smartAttack.getValue() || cooldownProgress >= 0.9f;
 
             // Handle rotations to the primary target
             handleRotations();
@@ -201,17 +202,15 @@ public class Aura extends Module {
         List<Entity> potentialTargets = new ArrayList<>();
         double rangeSq = range.getValue() * range.getValue();
 
-        // Collect potential targets
+        // Search for entities within range
         for (Entity entity : mc.world.getEntities()) {
-            // Basic entity checks
-            if (!(entity instanceof LivingEntity)) continue;
+            // Skip ineligible entities
+            if (!(entity instanceof LivingEntity livingEntity)) continue;
             if (entity == mc.player) continue;
             if (entity.isRemoved()) continue;
-
-            LivingEntity livingEntity = (LivingEntity) entity;
             if (livingEntity.isDead() || livingEntity.getHealth() <= 0) continue;
 
-            // Check entity type filters
+            // Apply entity type filters
             if (entity instanceof PlayerEntity) {
                 if (!targetPlayers.getValue()) continue;
                 if (((PlayerEntity) entity).isSpectator()) continue;
@@ -236,7 +235,7 @@ public class Aura extends Module {
                 Vec3d playerLook = mc.player.getRotationVec(1.0f);
                 Vec3d entityDir = entity.getPos().subtract(mc.player.getEyePos()).normalize();
                 double dot = playerLook.dotProduct(entityDir);
-                double angleDegrees = Math.toDegrees(Math.acos(dot));
+                double angleDegrees = Math.toDegrees(Math.acos(Math.min(1.0, Math.max(-1.0, dot))));
 
                 // Skip if outside the FOV check setting
                 if (angleDegrees > fovCheck.getValue() / 2) continue;
@@ -270,10 +269,6 @@ public class Aura extends Module {
                     }));
                 }
                 break;
-
-            default:
-                potentialTargets.sort(Comparator.comparingDouble(mc.player::squaredDistanceTo));
-                break;
         }
 
         // Set targets
@@ -299,68 +294,58 @@ public class Aura extends Module {
             aimPos = primaryTarget.getPos().add(0, primaryTarget.getHeight() / 2, 0);
         }
 
-        // Calculate raw target angles
-        float[] targetAngles = RotationHandler.calculateLookAt(aimPos);
+        // Apply smoother interpolation based on rotation speed
+        boolean silent;
+        boolean bodyOnly;
 
-        // Apply smoother interpolation
-        float[] currentAngles;
-        if (mc.player != null) {
-            currentAngles = new float[]{mc.player.getYaw(), mc.player.getPitch()};
+        switch (rotationMode.getValue()) {
+            case "Silent":
+                // Server-only rotation, camera doesn't move
+                silent = true;
+                bodyOnly = false;
+                break;
 
-            // Calculate differences
-            float yawDiff = MathHelper.wrapDegrees(targetAngles[0] - currentAngles[0]);
-            float pitchDiff = targetAngles[1] - currentAngles[1];
+            case "Client":
+                // Full visible rotation, camera moves
+                silent = false;
+                bodyOnly = false;
+                break;
 
-            // Apply speed factor
-            float yawChange = yawDiff * rotationSpeed.getValue();
-            float pitchChange = pitchDiff * rotationSpeed.getValue();
+            case "Body":
+                // Body rotation but camera stays still
+                silent = true;
+                bodyOnly = true;
+                break;
 
-            // Clamp to avoid very small changes that never reach target
-            if (Math.abs(yawDiff) < 1.0f) yawChange = yawDiff;
-            if (Math.abs(pitchDiff) < 1.0f) pitchChange = pitchDiff;
+            default:
+                // Default to silent mode
+                silent = true;
+                bodyOnly = false;
+                break;
+        }
 
-            // Smooth angles
-            float smoothYaw = currentAngles[0] + yawChange;
-            float smoothPitch = MathHelper.clamp(currentAngles[1] + pitchChange, -90f, 90f);
+        // Send rotation request to our handler
+        RotationHandler.requestLookAt(
+                aimPos,
+                ROTATION_PRIORITY,
+                100, // Short duration for frequent updates
+                silent,
+                state -> rotating = true
+        );
 
-            // Handle different rotation modes
-            boolean silent;
-            boolean bodyOnly;
+        // If body rotation mode, use the requestRotation method that supports bodyOnly
+        if (bodyOnly) {
+            // First calculate rotations
+            float[] rotations = RotationHandler.calculateLookAt(aimPos);
 
-            switch (rotationMode.getValue()) {
-                case "Silent":
-                    // Server-only rotation, camera doesn't move
-                    silent = true;
-                    bodyOnly = false;
-                    break;
-
-                case "Client":
-                    // Full visible rotation, camera moves
-                    silent = false;
-                    bodyOnly = false;
-                    break;
-
-                case "Body":
-                    // Body rotation but camera stays still
-                    silent = true;
-                    bodyOnly = true;
-                    break;
-
-                default:
-                    // Default to silent mode
-                    silent = true;
-                    bodyOnly = false;
-                    break;
-            }
-
-            // Send rotation request
+            // Then use the requestRotation method that supports the bodyOnly parameter
             RotationHandler.requestRotation(
-                    smoothYaw,
-                    smoothPitch,
+                    rotations[0],
+                    rotations[1],
                     ROTATION_PRIORITY,
-                    100, // Shorter duration allows more frequent updates
-                    silent,
-                    bodyOnly,
+                    100,
+                    true, // silent
+                    true, // bodyOnly
                     state -> rotating = true
             );
         }
@@ -381,8 +366,23 @@ public class Aura extends Module {
      * Attempts to block with a shield after attacking
      */
     private void tryBlock() {
-        // TODO: Implement shield blocking logic
-        // Check if player has a shield in offhand or mainhand
-        // and use mc.options.useKey to start blocking
+        // Get mainhand and offhand items
+        boolean hasShield = mc.player.getOffHandStack().isOf(net.minecraft.item.Items.SHIELD) ||
+                mc.player.getMainHandStack().isOf(net.minecraft.item.Items.SHIELD);
+
+        if (hasShield) {
+            // Use key binding to block with shield
+            mc.options.useKey.setPressed(true);
+
+            // Schedule releasing the key after a short delay (150ms)
+            new Thread(() -> {
+                try {
+                    Thread.sleep(150);
+                    mc.options.useKey.setPressed(false);
+                } catch (InterruptedException e) {
+                    // Ignore interruption
+                }
+            }).start();
+        }
     }
 }
