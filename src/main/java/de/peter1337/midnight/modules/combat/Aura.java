@@ -96,6 +96,7 @@ public class Aura extends Module {
     private boolean rotating = false;
     private float originalYaw;
     private float originalPitch;
+    private boolean attackedThisTick = false;
 
     public Aura() {
         super("Aura", "Automatically attacks nearby entities", Category.COMBAT, "r");
@@ -129,10 +130,37 @@ public class Aura extends Module {
         }
     }
 
+    /**
+     * Method called during START_CLIENT_TICK
+     */
+    public void preUpdate() {
+        if (!isEnabled() || mc.player == null || mc.world == null) return;
+
+        // Process attack logic in PRE tick
+        processAttack();
+
+        // Set the flag to indicate we've already attacked in this tick
+        attackedThisTick = true;
+    }
+
     @Override
     public void onUpdate() {
         if (!isEnabled() || mc.player == null || mc.world == null) return;
 
+        // Skip attack logic if already processed in PRE tick
+        if (attackedThisTick) {
+            attackedThisTick = false; // Reset for next tick
+            return;
+        }
+
+        // Process attack logic in POST tick if not already done in PRE
+        processAttack();
+    }
+
+    /**
+     * Processes the attack logic
+     */
+    private void processAttack() {
         // Calculate attack delay based on CPS
         long currentTime = System.currentTimeMillis();
         float baseDelay = 1000.0f / cps.getValue(); // Convert CPS to milliseconds
