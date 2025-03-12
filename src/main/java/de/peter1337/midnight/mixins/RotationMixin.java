@@ -2,56 +2,65 @@ package de.peter1337.midnight.mixins;
 
 import de.peter1337.midnight.handler.RotationHandler;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.entity.Entity;
-import net.minecraft.util.math.MathHelper;
+import net.minecraft.client.network.ClientPlayerEntity;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * A minimal mixin that stores the original rotation values
- * and then manually sets them just before sending a packet
+ * A revised mixin that focuses only on packet sending without affecting rendering
  */
-@Mixin(net.minecraft.client.network.ClientPlayerEntity.class)
+@Mixin(ClientPlayerEntity.class)
 public class RotationMixin {
+    // Store the original rotations
+    private float originalYaw;
+    private float originalPitch;
+    private float originalHeadYaw;
+    private float originalBodyYaw;
 
-    private float lastRealYaw;
-    private float lastRealPitch;
-    private boolean rotationChanging = false;
+    // Track if our rotations have been applied for packet sending
+    private boolean rotationsAppliedForPacket = false;
 
     /**
-     * Update rotations before the game tick, which is when packets are sent
+     * Apply server-side rotations for packet sending, but store originals
      */
-    @Inject(method = "tick", at = @At("HEAD"))
-    private void onPreTick(CallbackInfo ci) {
+    @Inject(method = "sendMovementPackets", at = @At("HEAD"))
+    private void beforeSendMovementPackets(CallbackInfo ci) {
+        MinecraftClient mc = MinecraftClient.getInstance();
         if (RotationHandler.isRotationActive() && !RotationHandler.isRotatingClient()) {
-            net.minecraft.client.network.ClientPlayerEntity player = (net.minecraft.client.network.ClientPlayerEntity)(Object)this;
+            ClientPlayerEntity player = (ClientPlayerEntity)(Object)this;
 
-            // Store original rotations
-            lastRealYaw = player.getYaw();
-            lastRealPitch = player.getPitch();
+            // Store original values
+            originalYaw = player.getYaw();
+            originalPitch = player.getPitch();
+            originalHeadYaw = player.headYaw;
+            originalBodyYaw = player.bodyYaw;
 
-            // Apply server rotations temporarily
+            // Apply server-side rotations for packet
             player.setYaw(RotationHandler.getServerYaw());
             player.setPitch(RotationHandler.getServerPitch());
-            rotationChanging = true;
+            player.headYaw = RotationHandler.getServerYaw();
+
+            rotationsAppliedForPacket = true;
         }
     }
 
     /**
-     * Reset rotations after the tick is done
+     * Restore original rotations after packet sending
      */
-    @Inject(method = "tick", at = @At("RETURN"))
-    private void onPostTick(CallbackInfo ci) {
-        if (rotationChanging) {
-            net.minecraft.client.network.ClientPlayerEntity player = (net.minecraft.client.network.ClientPlayerEntity)(Object)this;
+    @Inject(method = "sendMovementPackets", at = @At("RETURN"))
+    private void afterSendMovementPackets(CallbackInfo ci) {
+        if (rotationsAppliedForPacket) {
+            ClientPlayerEntity player = (ClientPlayerEntity)(Object)this;
 
-            // Restore original rotations
-            player.setYaw(lastRealYaw);
-            player.setPitch(lastRealPitch);
-            rotationChanging = false;
+            // Restore original values
+            player.setYaw(originalYaw);
+            player.setPitch(originalPitch);
+            player.headYaw = originalHeadYaw;
+            player.bodyYaw = originalBodyYaw;
+
+            rotationsAppliedForPacket = false;
         }
     }
 }

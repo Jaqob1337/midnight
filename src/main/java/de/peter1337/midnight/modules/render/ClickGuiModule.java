@@ -8,18 +8,21 @@ import net.minecraft.client.MinecraftClient;
 
 public class ClickGuiModule extends Module {
 
-    // New setting: if enabled, the ClickGUI panel position will be saved and restored.
-    private final Setting<Boolean> positionSaving = register(
-            new Setting<>("PositionSaving", Boolean.TRUE, "Saves and loads the ClickGUI panel position")
+    // Setting to toggle position saving
+    private final Setting<Boolean> savePosition = register(
+            new Setting<>("SavePosition", Boolean.TRUE, "Saves and loads the ClickGUI panel position")
     );
 
     public ClickGuiModule() {
         super("ClickGUI", "Opens the client ClickGUI", Category.RENDER, "rshift");
     }
 
-
-    public boolean isPositionSavingEnabled() {
-        return positionSaving.getValue();
+    /**
+     * Check if position saving is enabled
+     * @return true if position saving is enabled
+     */
+    public boolean isSavePositionEnabled() {
+        return savePosition.getValue();
     }
 
     @Override

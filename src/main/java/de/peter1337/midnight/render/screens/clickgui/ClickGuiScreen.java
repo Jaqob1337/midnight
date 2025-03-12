@@ -1,5 +1,6 @@
 package de.peter1337.midnight.render.screens.clickgui;
 
+import de.peter1337.midnight.Midnight;
 import de.peter1337.midnight.manager.ConfigManager;
 import de.peter1337.midnight.manager.ModuleManager;
 import de.peter1337.midnight.modules.Category;
@@ -71,12 +72,6 @@ public class ClickGuiScreen extends GuiScreen {
         background = new ClickGuiBackground(render2D, width, height);
         ConfigManager.setClickGuiBackground(background);
 
-        // Load only the ClickGUI UI state (scroll, selected category, expanded states).
-        var clickGuiModule = ModuleManager.getModule("ClickGUI");
-        if (clickGuiModule instanceof ClickGuiModule && ((ClickGuiModule) clickGuiModule).isPositionSavingEnabled()) {
-            ConfigManager.loadConfig("lastclickgui");
-        }
-
         categoryButtons.clear();
         moduleButtons.clear();
         targetCategoryScroll = ConfigManager.savedCategoryScroll;
@@ -119,6 +114,31 @@ public class ClickGuiScreen extends GuiScreen {
         // Set both the main and module clip regions for combined clipping.
         render2D.setMainClip(background.getBackground());
         render2D.setModuleClip(background.getModuleSection());
+    }
+
+    @Override
+    public void close() {
+        // Save the last selected category.
+        ConfigManager.savedCategory = (selectedCategory != null ? selectedCategory.name() : "");
+        // Save expanded state from all module buttons.
+        ConfigManager.savedExpanded.clear();
+        for (List<ClickGuiModuleButton> moduleList : moduleButtons.values()) {
+            for (ClickGuiModuleButton moduleButton : moduleList) {
+                ConfigManager.savedExpanded.put(moduleButton.getModule().getName(), moduleButton.isExpanded());
+            }
+        }
+        // Save category scroll position.
+        ConfigManager.savedCategoryScroll = currentCategoryScroll;
+
+        // Save the ClickGUI position to the current config
+        ConfigManager.saveClickGuiPosition();
+
+        var clickGuiModule = ModuleManager.getModule("ClickGUI");
+        if (clickGuiModule != null && clickGuiModule.isEnabled()) {
+            clickGuiModule.toggle();
+        }
+        MinecraftClient.getInstance().options.getMenuBackgroundBlurriness().setValue(8);
+        super.close();
     }
 
     private void initializeCategories() {
@@ -557,31 +577,6 @@ public class ClickGuiScreen extends GuiScreen {
                     mouseY <= bg.getY() + bg.getHeight();
         }
         return false;
-    }
-
-    @Override
-    public void close() {
-        // Save the last selected category.
-        ConfigManager.savedCategory = (selectedCategory != null ? selectedCategory.name() : "");
-        // Save expanded state from all module buttons.
-        ConfigManager.savedExpanded.clear();
-        for (List<ClickGuiModuleButton> moduleList : moduleButtons.values()) {
-            for (ClickGuiModuleButton moduleButton : moduleList) {
-                ConfigManager.savedExpanded.put(moduleButton.getModule().getName(), moduleButton.isExpanded());
-            }
-        }
-        // Save category scroll position.
-        ConfigManager.savedCategoryScroll = currentCategoryScroll;
-
-        var clickGuiModule = ModuleManager.getModule("ClickGUI");
-        if (clickGuiModule instanceof ClickGuiModule && ((ClickGuiModule) clickGuiModule).isPositionSavingEnabled()) {
-            ConfigManager.saveConfig("lastclickgui");
-        }
-        if (clickGuiModule != null && clickGuiModule.isEnabled()) {
-            clickGuiModule.toggle();
-        }
-        MinecraftClient.getInstance().options.getMenuBackgroundBlurriness().setValue(8);
-        super.close();
     }
 
     @Override

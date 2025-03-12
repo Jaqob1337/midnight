@@ -13,14 +13,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * Mixin to control player model rotations when using the RotationHandler
- * Only applies in third-person view
+ * Properly handles both base model and all skin layers in third-person view
  */
 @Mixin(BipedEntityModel.class)
 public class PlayerModelRotationMixin<T extends BipedEntityRenderState> {
 
     /**
      * Injects at the end of the setAngles method to override rotations if our handler is active
-     * Only applies rotations in third-person view
      */
     @Inject(method = "setAngles(Lnet/minecraft/client/render/entity/state/BipedEntityRenderState;)V", at = @At("RETURN"))
     private void onSetAngles(T state, CallbackInfo ci) {
@@ -62,13 +61,16 @@ public class PlayerModelRotationMixin<T extends BipedEntityRenderState> {
                 model.head.yaw = relativeYawRadians;
                 model.head.pitch = serverPitch * ((float)Math.PI / 180F);
 
-                // Hat copies the head rotation
-                model.hat.copyTransform(model.head);
+                // The hat is a child of head in BipedEntityModel, so it will automatically inherit rotations
+                // No need to explicitly set hat rotation as it's done via parent-child relationship
 
+                // If there are any other custom player model parts in your implementation
+                // that aren't properly updated through inheritance, you can add them here
             }
         } catch (Exception e) {
             // Log any errors but don't crash the game
             Midnight.LOGGER.error("Error in PlayerModelRotationMixin: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 }

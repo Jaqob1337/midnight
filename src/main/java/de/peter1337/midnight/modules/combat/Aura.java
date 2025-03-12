@@ -4,6 +4,7 @@ import de.peter1337.midnight.handler.RotationHandler;
 import de.peter1337.midnight.modules.Category;
 import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.modules.Setting;
+import de.peter1337.midnight.utils.RaytraceUtil;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
@@ -26,6 +27,11 @@ public class Aura extends Module {
     // Current target entities
     private List<Entity> targetEntities = new ArrayList<>();
     private Entity primaryTarget = null;
+    private Vec3d targetPoint = null;
+
+    // Target motion tracking variables (defined at class level)
+    private double targetMovementSpeed = 0.0;
+    private float targetDistance = 0.0f;
 
     // The rotation priority for this module
     private static final int ROTATION_PRIORITY = 100;
@@ -63,16 +69,29 @@ public class Aura extends Module {
 
     private final Setting<String> rotationMode = register(
             new Setting<>("RotationMode", "Silent",
-                    List.of("Silent", "Client"),
+                    List.of("Silent", "Client", "Body"),
                     "Silent: server-only, Client: visible, Body: shows on body only")
     );
 
     private final Setting<Float> rotationSpeed = register(
-            new Setting<>("RotationSpeed", 0.3f, 0.1f, 1.0f, "Rotation speed factor")
+            new Setting<>("RotationSpeed", 0.7f, 0.1f, 1.0f, "Rotation speed factor")
+    );
+
+    private final Setting<Boolean> predictiveAim = register(
+            new Setting<>("PredictiveAim", Boolean.TRUE, "Predict target movement for more accurate rotations")
+    );
+
+    private final Setting<Float> aimPrediction = register(
+            new Setting<>("AimPrediction", 0.5f, 0.1f, 2.0f, "Prediction strength for target movement")
+                    .dependsOn(predictiveAim)
     );
 
     private final Setting<Boolean> throughWalls = register(
             new Setting<>("ThroughWalls", Boolean.FALSE, "Attack through walls")
+    );
+
+    private final Setting<Boolean> rayTrace = register(
+            new Setting<>("RayTrace", Boolean.TRUE, "Only attack if server rotations are looking at the target")
     );
 
     private final Setting<Boolean> autoBlock = register(
@@ -106,7 +125,10 @@ public class Aura extends Module {
     public void onEnable() {
         targetEntities.clear();
         primaryTarget = null;
+        targetPoint = null;
         rotating = false;
+        targetMovementSpeed = 0.0;
+        targetDistance = 0.0f;
 
         if (mc.player != null) {
             originalYaw = mc.player.getYaw();
@@ -118,6 +140,9 @@ public class Aura extends Module {
     public void onDisable() {
         targetEntities.clear();
         primaryTarget = null;
+        targetPoint = null;
+        targetMovementSpeed = 0.0;
+        targetDistance = 0.0f;
 
         // Cancel rotations when disabling
         RotationHandler.cancelRotationByPriority(ROTATION_PRIORITY);
@@ -163,7 +188,7 @@ public class Aura extends Module {
     private void processAttack() {
         // Calculate attack delay based on CPS
         long currentTime = System.currentTimeMillis();
-        float baseDelay = 1000.0f / cps.getValue(); // Convert CPS to milliseconds
+        float baseDelay = 600.0f / cps.getValue(); // Convert CPS to milliseconds
 
         // Add randomization if enabled (±30% variation)
         long attackDelay;
@@ -187,15 +212,53 @@ public class Aura extends Module {
 
         // If we have targets, handle rotations and attacks
         if (!targetEntities.isEmpty() && primaryTarget != null) {
+            // Update target metrics for this tick
+            updateTargetMetrics();
+
             // Check attack cooldown if smart attack enabled
             float cooldownProgress = mc.player.getAttackCooldownProgress(0.0f);
             boolean cooldownReady = !smartAttack.getValue() || cooldownProgress >= 0.9f;
 
+            // Find a visible point on the target to aim at
+            targetPoint = findVisiblePoint(primaryTarget);
+
+            // If no visible point and we're not allowed to attack through walls, skip
+            if (targetPoint == null && !throughWalls.getValue()) {
+                return;
+            }
+
+            // Use center point if no visible point and throughWalls is enabled
+            if (targetPoint == null) {
+                targetPoint = primaryTarget.getPos().add(0, primaryTarget.getHeight() / 2, 0);
+            }
+
             // Handle rotations to the primary target
             handleRotations();
 
+            // Validate that the server rotations are actually looking at the entity if rayTrace is enabled
+            boolean canHit = true;
+            if (rayTrace.getValue() && RotationHandler.isRotationActive()) {
+                float serverYaw = RotationHandler.getServerYaw();
+                float serverPitch = RotationHandler.getServerPitch();
+
+                // Use a more tolerant raytrace for fast-moving targets
+                if (targetMovementSpeed > 0.15) {
+                    // Create a slightly expanded hitbox for fast-moving targets
+                    Box expandedBox = primaryTarget.getBoundingBox().expand(0.2);
+                    Vec3d eyePos = mc.player.getEyePos();
+                    Vec3d lookVec = RaytraceUtil.getVectorForRotation(serverPitch, serverYaw);
+                    Vec3d endPos = eyePos.add(lookVec.multiply(range.getValue() + 1));
+
+                    // Check if rotations would hit the expanded hitbox
+                    canHit = RaytraceUtil.rayTraceEntityBox(eyePos, endPos, expandedBox) != null;
+                } else {
+                    // Normal raytrace for slower targets
+                    canHit = RaytraceUtil.isEntityInServerView(primaryTarget, serverYaw, serverPitch, range.getValue() + 1);
+                }
+            }
+
             // Attack if rotation is complete, cooldown is ready, and we can attack
-            if (canAttack && cooldownReady && RotationHandler.isRotationActive()) {
+            if (canAttack && cooldownReady && RotationHandler.isRotationActive() && canHit) {
                 // Attack the primary target
                 attack(primaryTarget);
                 lastAttackTime = currentTime;
@@ -219,11 +282,28 @@ public class Aura extends Module {
     }
 
     /**
+     * Updates metrics about the current target
+     */
+    private void updateTargetMetrics() {
+        if (primaryTarget == null || mc.player == null) return;
+
+        // Update target distance
+        targetDistance = (float)mc.player.getPos().distanceTo(primaryTarget.getPos());
+
+        // Update movement speed
+        targetMovementSpeed = Math.sqrt(
+                Math.pow(primaryTarget.getX() - primaryTarget.prevX, 2) +
+                        Math.pow(primaryTarget.getZ() - primaryTarget.prevZ, 2)
+        );
+    }
+
+    /**
      * Finds and prioritizes potential targets
      */
     private void findTargets() {
         targetEntities.clear();
         primaryTarget = null;
+        targetPoint = null;
 
         if (mc.player == null || mc.world == null) return;
 
@@ -254,8 +334,9 @@ public class Aura extends Module {
             // Check distance
             if (mc.player.squaredDistanceTo(entity) > rangeSq) continue;
 
-            // Skip if not visible and through walls is disabled
-            if (!throughWalls.getValue() && !mc.player.canSee(entity)) continue;
+            // Check if entity is visible through walls
+            boolean isVisible = RaytraceUtil.canSeeEntity(entity);
+            if (!isVisible && !throughWalls.getValue()) continue;
 
             // Check if entity is within the player's field of view
             if (fovCheck.getValue() < 360f) {
@@ -309,20 +390,71 @@ public class Aura extends Module {
     }
 
     /**
+     * Finds a point on the entity that is visible to the player for precise targeting
+     * @param entity The target entity
+     * @return A visible position on the entity, or null if none found
+     */
+    private Vec3d findVisiblePoint(Entity entity) {
+        Vec3d visiblePoint = RaytraceUtil.getVisiblePoint(entity);
+
+        // Apply predictive aiming if enabled
+        if (visiblePoint != null && predictiveAim.getValue() && entity.distanceTo(mc.player) > 2.0) {
+            // Calculate velocity of the target entity
+            Vec3d velocity = new Vec3d(
+                    entity.getX() - entity.prevX,
+                    entity.getY() - entity.prevY,
+                    entity.getZ() - entity.prevZ
+            );
+
+            // Only predict horizontal movement for more stable aiming
+            Vec3d prediction = new Vec3d(
+                    velocity.x * aimPrediction.getValue() * 10.0,
+                    velocity.y * aimPrediction.getValue() * 2.5, // Less vertical prediction
+                    velocity.z * aimPrediction.getValue() * 10.0
+            );
+
+            // Apply prediction to the visible point
+            visiblePoint = visiblePoint.add(prediction);
+
+            // Make sure the prediction still aims at the entity's hitbox
+            Box expandedBox = entity.getBoundingBox().expand(0.4); // Slightly expand hitbox for prediction tolerance
+            if (!expandedBox.contains(visiblePoint)) {
+                // If prediction is outside hitbox, clamp it to the edge of the hitbox
+                visiblePoint = RaytraceUtil.rayTraceEntityBox(mc.player.getEyePos(), visiblePoint, expandedBox);
+
+                // If still null, fall back to the original point
+                if (visiblePoint == null) {
+                    visiblePoint = RaytraceUtil.getVisiblePoint(entity);
+                }
+            }
+        }
+
+        return visiblePoint;
+    }
+
+    /**
      * Handles rotations to the primary target
      */
     private void handleRotations() {
-        if (primaryTarget == null) return;
+        if (primaryTarget == null || targetPoint == null) return;
 
-        // Get the position to aim at (eye height for players, center for other entities)
-        Vec3d aimPos;
-        if (primaryTarget instanceof PlayerEntity) {
-            aimPos = primaryTarget.getEyePos();
-        } else {
-            aimPos = primaryTarget.getPos().add(0, primaryTarget.getHeight() / 2, 0);
+        // Calculate rotation speed based on target metrics
+        float speedMultiplier = rotationSpeed.getValue();
+
+        // Increase speed for fast-moving targets
+        if (targetMovementSpeed > 0.1) {
+            speedMultiplier = Math.min(1.0f, speedMultiplier * 1.5f);
         }
 
-        // Apply smoother interpolation based on rotation speed
+        // Decrease smoothing at close range for more responsive rotations
+        if (targetDistance < 3.0f) {
+            speedMultiplier = Math.min(1.0f, speedMultiplier * 1.3f);
+        }
+
+        // Calculate the rotations to the target point
+        float[] rotations = RotationHandler.calculateLookAt(targetPoint);
+
+        // Determine rotation mode parameters
         boolean silent;
         boolean bodyOnly;
 
@@ -352,30 +484,41 @@ public class Aura extends Module {
                 break;
         }
 
-        // Send rotation request to our handler
-        RotationHandler.requestLookAt(
-                aimPos,
-                ROTATION_PRIORITY,
-                100, // Short duration for frequent updates
-                silent,
-                state -> rotating = true
-        );
-
-        // If body rotation mode, use the requestRotation method that supports bodyOnly
+        // If body rotation mode, use the specialized method
         if (bodyOnly) {
-            // First calculate rotations
-            float[] rotations = RotationHandler.calculateLookAt(aimPos);
-
-            // Then use the requestRotation method that supports the bodyOnly parameter
             RotationHandler.requestRotation(
                     rotations[0],
                     rotations[1],
                     ROTATION_PRIORITY,
-                    100,
+                    50, // Shorter duration for faster rotation updates
                     true, // silent
                     true, // bodyOnly
                     state -> rotating = true
             );
+        } else {
+            // Apply faster rotations for moving targets or close range
+            if (targetMovementSpeed > 0.15 || targetDistance < 2.5f) {
+                // Direct rotation for fast-moving or close targets
+                RotationHandler.requestRotation(
+                        rotations[0],
+                        rotations[1],
+                        ROTATION_PRIORITY,
+                        40, // Very short duration for rapid updates
+                        silent,
+                        false,
+                        state -> rotating = true
+                );
+            } else {
+                // Use smoother rotation with look-at for normal cases
+                RotationHandler.requestSmoothLookAt(
+                        targetPoint,
+                        speedMultiplier * 2.0f, // Increase speed multiplier
+                        ROTATION_PRIORITY,
+                        50, // Shorter duration for faster rotation updates
+                        silent,
+                        state -> rotating = true
+                );
+            }
         }
     }
 

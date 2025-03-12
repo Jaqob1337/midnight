@@ -8,15 +8,15 @@
 		"ChatMixin",
 		"ChatScreenAccessor",
 		"EntityGlowingMixin",
+		"PlayerJoinMixin",
+		"PlayerModelRotationMixin",
 		"PlayerVelocityMixin",
 		"RotationMixin",
 		"StatusEffectHudMixin",
 		"SystemMessageMixin",
 		"TitleScreenMixin",
 		"ToastMixin",
-		"VelocityMixin",
-		"PlayerModelRotationMixin"
-
+		"VelocityMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

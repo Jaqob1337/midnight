@@ -2,6 +2,7 @@ package de.peter1337.midnight.manager;
 
 import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.modules.combat.Aura;
+import de.peter1337.midnight.modules.movement.Speed;
 import de.peter1337.midnight.modules.movement.Sprint;
 import de.peter1337.midnight.modules.player.InvManager;
 import de.peter1337.midnight.modules.player.Stealer;
@@ -12,6 +13,8 @@ import de.peter1337.midnight.modules.misc.NotificationBlocker;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.util.math.MatrixStack;
+
+import javax.swing.text.html.HTMLDocument;
 
 public class ModuleManager {
     private static final List<Module> modules = new ArrayList<>();
@@ -26,6 +29,7 @@ public class ModuleManager {
         registerModule(new InvManager());
         registerModule(new Velocity());
         registerModule(new Aura());
+        registerModule(new Speed());
     }
 
     private static void registerModule(Module module) {

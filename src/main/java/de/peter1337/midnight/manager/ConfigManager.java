@@ -2,20 +2,18 @@ package de.peter1337.midnight.manager;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonPrimitive;
 import de.peter1337.midnight.Midnight;
 import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.modules.Setting;
+import de.peter1337.midnight.modules.render.ClickGuiModule;
 import de.peter1337.midnight.render.screens.clickgui.background.ClickGuiBackground;
 import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 public class ConfigManager {
@@ -27,8 +25,25 @@ public class ConfigManager {
     public static Map<String, Boolean> savedExpanded = new HashMap<>();
     public static float savedCategoryScroll = 0f;
 
+    // Track the currently loaded config
+    private static String currentConfigName = "default";
+    private static boolean configLoaded = false;
+
+    // Store position for ClickGUI
+    private static float savedGuiX = -1;
+    private static float savedGuiY = -1;
+
     public static void setClickGuiBackground(ClickGuiBackground background) {
         clickGuiBackground = background;
+
+        // Check if position saving is enabled
+        ClickGuiModule clickGuiModule = (ClickGuiModule) ModuleManager.getModule("ClickGUI");
+
+        // Apply saved position if we have one and position saving is enabled
+        if (savedGuiX >= 0 && savedGuiY >= 0 && clickGuiModule != null && clickGuiModule.isSavePositionEnabled()) {
+            background.getBackground().setPosition(savedGuiX, savedGuiY);
+            Midnight.LOGGER.info("Applied saved ClickGUI position: x={}, y={}", savedGuiX, savedGuiY);
+        }
     }
 
     /**
@@ -42,33 +57,61 @@ public class ConfigManager {
         return configFile.exists() && configFile.isFile();
     }
 
+    /**
+     * Create the default config if it doesn't exist
+     */
+    public static void createDefaultConfigIfNotExists() {
+        if (!configExists("default")) {
+            Midnight.LOGGER.info("Creating default config");
+            saveConfig("default");
+        }
+    }
+
+    /**
+     * Load the default config
+     */
+    public static void loadDefaultConfig() {
+        if (configExists("default")) {
+            Midnight.LOGGER.info("Loading default config");
+            loadConfig("default");
+        } else {
+            Midnight.LOGGER.info("Default config doesn't exist, creating it");
+            saveConfig("default");
+        }
+    }
+
     public static void saveConfig(String configName) {
         if (!Midnight.CONFIG_DIR.exists()) {
             Midnight.CONFIG_DIR.mkdirs();
         }
+
+        // Update the current config name
+        currentConfigName = configName;
+        configLoaded = true;
+
         File configFile = new File(Midnight.CONFIG_DIR, configName + ".json");
         JsonObject configJson = new JsonObject();
 
-        // Save ClickGUI UI state
-        JsonObject clickGuiJson = new JsonObject();
+        // Save ClickGUI position if we have it
         if (clickGuiBackground != null) {
-            clickGuiJson.addProperty("x", clickGuiBackground.getBackground().getX());
-            clickGuiJson.addProperty("y", clickGuiBackground.getBackground().getY());
-        }
-        clickGuiJson.addProperty("categoryScroll", savedCategoryScroll);
-        if (savedCategory != null && !savedCategory.isEmpty()) {
-            clickGuiJson.addProperty("selectedCategory", savedCategory);
-        }
-        if (savedExpanded != null && !savedExpanded.isEmpty()) {
-            JsonObject expandedJson = new JsonObject();
-            for (Map.Entry<String, Boolean> entry : savedExpanded.entrySet()) {
-                expandedJson.addProperty(entry.getKey(), entry.getValue());
-            }
-            clickGuiJson.add("expanded", expandedJson);
-        }
-        configJson.add("clickgui", clickGuiJson);
+            JsonObject clickGuiJson = new JsonObject();
 
-        // Save all modules state and settings
+            // Get the current position from the background
+            float x = clickGuiBackground.getBackground().getX();
+            float y = clickGuiBackground.getBackground().getY();
+
+            // Save in the config
+            clickGuiJson.addProperty("x", x);
+            clickGuiJson.addProperty("y", y);
+
+            // Also update our static saved position
+            savedGuiX = x;
+            savedGuiY = y;
+
+            configJson.add("clickgui", clickGuiJson);
+        }
+
+        // Save modules state and settings
         JsonObject modulesJson = new JsonObject();
 
         for (Module module : ModuleManager.getModules()) {
@@ -136,32 +179,28 @@ public class ConfigManager {
             return;
         }
 
+        // Update the current config name
+        currentConfigName = configName;
+        configLoaded = true;
+
         try (FileReader reader = new FileReader(configFile)) {
             JsonObject configJson = gson.fromJson(reader, JsonObject.class);
 
-            // Load UI state
+            // Load ClickGUI position if available
             if (configJson.has("clickgui")) {
                 JsonObject clickGuiJson = configJson.getAsJsonObject("clickgui");
 
-                if (clickGuiBackground != null && clickGuiJson.has("x") && clickGuiJson.has("y")) {
-                    float x = clickGuiJson.get("x").getAsFloat();
-                    float y = clickGuiJson.get("y").getAsFloat();
-                    clickGuiBackground.getBackground().setPosition(x, y);
-                }
+                if (clickGuiJson.has("x") && clickGuiJson.has("y")) {
+                    // Store the position to apply later when the GUI is opened
+                    savedGuiX = clickGuiJson.get("x").getAsFloat();
+                    savedGuiY = clickGuiJson.get("y").getAsFloat();
 
-                if (clickGuiJson.has("categoryScroll")) {
-                    savedCategoryScroll = clickGuiJson.get("categoryScroll").getAsFloat();
-                }
-
-                if (clickGuiJson.has("selectedCategory")) {
-                    savedCategory = clickGuiJson.get("selectedCategory").getAsString();
-                }
-
-                if (clickGuiJson.has("expanded")) {
-                    JsonObject expandedJson = clickGuiJson.getAsJsonObject("expanded");
-                    savedExpanded.clear();
-                    for (String key : expandedJson.keySet()) {
-                        savedExpanded.put(key, expandedJson.get(key).getAsBoolean());
+                    // If clickGuiBackground is already available, apply it now
+                    if (clickGuiBackground != null) {
+                        clickGuiBackground.getBackground().setPosition(savedGuiX, savedGuiY);
+                        Midnight.LOGGER.info("Loaded and applied ClickGUI position: x={}, y={}", savedGuiX, savedGuiY);
+                    } else {
+                        Midnight.LOGGER.info("Loaded ClickGUI position (will apply when GUI opens): x={}, y={}", savedGuiX, savedGuiY);
                     }
                 }
             }
@@ -256,5 +295,138 @@ public class ConfigManager {
             e.printStackTrace();
             Midnight.LOGGER.error("Failed to load config: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Saves only the ClickGUI position to the currently loaded config
+     * This is called every time the ClickGUI is closed
+     */
+    public static void saveClickGuiPosition() {
+        // Check if position saving is enabled
+        ClickGuiModule clickGuiModule = (ClickGuiModule) ModuleManager.getModule("ClickGUI");
+        if (clickGuiModule == null || !clickGuiModule.isSavePositionEnabled()) {
+            Midnight.LOGGER.info("ClickGUI position saving is disabled, skipping");
+            return;
+        }
+
+        if (!Midnight.CONFIG_DIR.exists()) {
+            Midnight.CONFIG_DIR.mkdirs();
+        }
+
+        if (clickGuiBackground == null) {
+            Midnight.LOGGER.warn("Cannot save ClickGUI position: background is null");
+            return;
+        }
+
+        // Get current position
+        float x = clickGuiBackground.getBackground().getX();
+        float y = clickGuiBackground.getBackground().getY();
+
+        // Update our saved position
+        savedGuiX = x;
+        savedGuiY = y;
+
+        // If no config is loaded yet, use default
+        if (!configLoaded) {
+            if (configExists("default")) {
+                currentConfigName = "default";
+                configLoaded = true;
+            } else {
+                // Create default config with just the position
+                JsonObject newConfigJson = new JsonObject();
+
+                // Add ClickGUI position
+                JsonObject clickGuiJson = new JsonObject();
+                clickGuiJson.addProperty("x", x);
+                clickGuiJson.addProperty("y", y);
+                newConfigJson.add("clickgui", clickGuiJson);
+
+                // Empty modules object
+                newConfigJson.add("modules", new JsonObject());
+
+                File configFile = new File(Midnight.CONFIG_DIR, "default.json");
+                try (FileWriter writer = new FileWriter(configFile)) {
+                    gson.toJson(newConfigJson, writer);
+                    Midnight.LOGGER.info("Created default config with ClickGUI position: {}", configFile.getPath());
+                    currentConfigName = "default";
+                    configLoaded = true;
+                } catch (IOException e) {
+                    e.printStackTrace();
+                    Midnight.LOGGER.error("Failed to create default config: {}", e.getMessage());
+                }
+
+                return;
+            }
+        }
+
+        File configFile = new File(Midnight.CONFIG_DIR, currentConfigName + ".json");
+
+        // If the file doesn't exist yet, create it with just the position
+        if (!configFile.exists()) {
+            JsonObject newConfigJson = new JsonObject();
+
+            // Add ClickGUI position
+            JsonObject clickGuiJson = new JsonObject();
+            clickGuiJson.addProperty("x", x);
+            clickGuiJson.addProperty("y", y);
+            newConfigJson.add("clickgui", clickGuiJson);
+
+            // Empty modules object
+            newConfigJson.add("modules", new JsonObject());
+
+            try (FileWriter writer = new FileWriter(configFile)) {
+                gson.toJson(newConfigJson, writer);
+                Midnight.LOGGER.info("Created new config with ClickGUI position: {}", configFile.getPath());
+            } catch (IOException e) {
+                e.printStackTrace();
+                Midnight.LOGGER.error("Failed to create new config: {}", e.getMessage());
+            }
+
+            return;
+        }
+
+        // If the file exists, update only the ClickGUI position
+        try (FileReader reader = new FileReader(configFile)) {
+            JsonObject configJson = gson.fromJson(reader, JsonObject.class);
+
+            // Update or create the clickgui section
+            JsonObject clickGuiJson;
+            if (configJson.has("clickgui")) {
+                clickGuiJson = configJson.getAsJsonObject("clickgui");
+            } else {
+                clickGuiJson = new JsonObject();
+                configJson.add("clickgui", clickGuiJson);
+            }
+
+            // Update position
+            clickGuiJson.addProperty("x", x);
+            clickGuiJson.addProperty("y", y);
+
+            // Write back to file
+            try (FileWriter writer = new FileWriter(configFile)) {
+                gson.toJson(configJson, writer);
+                Midnight.LOGGER.info("Updated ClickGUI position in config: {} (x={}, y={})",
+                        configFile.getPath(), x, y);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+            Midnight.LOGGER.error("Failed to update ClickGUI position: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Gets the currently loaded config name
+     * @return The name of the currently loaded config
+     */
+    public static String getCurrentConfigName() {
+        return currentConfigName;
+    }
+
+    /**
+     * Checks if a config has been loaded
+     * @return true if a config has been loaded
+     */
+    public static boolean isConfigLoaded() {
+        return configLoaded;
     }
 }
