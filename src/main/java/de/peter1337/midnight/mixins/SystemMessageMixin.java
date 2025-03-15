@@ -4,6 +4,7 @@ import de.peter1337.midnight.manager.ModuleManager;
 import de.peter1337.midnight.modules.misc.NotificationBlocker;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.network.packet.s2c.play.GameMessageS2CPacket;
+import net.minecraft.text.Text;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -24,7 +25,17 @@ public class SystemMessageMixin {
         if (!packet.overlay()) {
             NotificationBlocker notificationBlocker = (NotificationBlocker) ModuleManager.getModule("NotificationBlocker");
             if (notificationBlocker != null && notificationBlocker.shouldBlockSystemMessages()) {
-                ci.cancel();
+                // Check if it's a notification message (like NCP violations) vs. normal chat
+                String messageText = packet.content().getString();
+
+                // Block notification messages but allow regular chat
+                // Common notification prefixes to filter out
+                if (messageText.startsWith("[NCP]") ||
+                        messageText.startsWith("[AntiCheat]") ||
+                        messageText.startsWith("Server") ||
+                        (messageText.startsWith("[") && messageText.contains(">>"))) {
+                    ci.cancel();
+                }
             }
         }
     }

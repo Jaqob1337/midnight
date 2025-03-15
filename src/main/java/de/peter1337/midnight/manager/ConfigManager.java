@@ -183,7 +183,11 @@ public class ConfigManager {
         currentConfigName = configName;
         configLoaded = true;
 
-        try (FileReader reader = new FileReader(configFile)) {
+        try {
+            // Enable bypass before loading config to allow module toggling even when chat is open
+            Module.setBypassChatCheck(true);
+
+            FileReader reader = new FileReader(configFile);
             JsonObject configJson = gson.fromJson(reader, JsonObject.class);
 
             // Load ClickGUI position if available
@@ -290,10 +294,14 @@ public class ConfigManager {
                 }
             }
 
+            reader.close();
             Midnight.LOGGER.info("Successfully loaded config: {}", configFile.getPath());
         } catch (IOException e) {
             e.printStackTrace();
             Midnight.LOGGER.error("Failed to load config: {}", e.getMessage());
+        } finally {
+            // Make sure to reset the bypass even if an exception occurs
+            Module.setBypassChatCheck(false);
         }
     }
 

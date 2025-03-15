@@ -9,7 +9,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * A revised mixin that focuses only on packet sending without affecting rendering
+ * A revised mixin that focuses on packet sending without affecting rendering
  */
 @Mixin(ClientPlayerEntity.class)
 public class RotationMixin {
@@ -42,7 +42,15 @@ public class RotationMixin {
             player.setPitch(RotationHandler.getServerPitch());
             player.headYaw = RotationHandler.getServerYaw();
 
+            // If body rotation mode is active, also update body yaw
+            if (RotationHandler.isBodyRotation()) {
+                player.bodyYaw = RotationHandler.getServerYaw();
+            }
+
             rotationsAppliedForPacket = true;
+
+            // Set flag to indicate rotations are being used for movement
+            RotationHandler.setUsingMoveFix(true);
         }
     }
 
@@ -61,6 +69,9 @@ public class RotationMixin {
             player.bodyYaw = originalBodyYaw;
 
             rotationsAppliedForPacket = false;
+
+            // Reset the flag
+            RotationHandler.setUsingMoveFix(false);
         }
     }
 }

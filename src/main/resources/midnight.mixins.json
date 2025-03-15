@@ -9,6 +9,8 @@
 		"ChatScreenAccessor",
 		"EntityGlowingMixin",
 		"PlayerJoinMixin",
+		"AttackEntityMixin",
+		"ChatScreenMixin",
 		"PlayerModelRotationMixin",
 		"PlayerVelocityMixin",
 		"RotationMixin",

@@ -15,7 +15,7 @@ public class Speed extends Module {
     );
 
     // Consistent movement speed value
-    private static final double MOVE_SPEED = 0.2753;
+    private static final double MOVE_SPEED = 0.2553;
 
     public Speed() {
         super("Speed", "Increases movement speed.", Category.MOVEMENT, "z");
@@ -71,7 +71,7 @@ public class Speed extends Module {
                 double forwardZ = Math.cos(yawRad) * 0.2 * forward;
 
                 // Apply scaling factor for diagonal movement to prevent speed addition
-                double diagonalScalingFactor = 0.8081; // sqrt(0.5) for diagonal movement
+                double diagonalScalingFactor = 0.7991; // sqrt(0.5) for diagonal movement
 
                 // Apply combined movement (both forward/back and strafe) with scaling
                 mc.player.setVelocity(

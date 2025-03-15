@@ -1,6 +1,8 @@
 package de.peter1337.midnight.modules;
 
 import de.peter1337.midnight.manager.BindManager;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.ChatScreen;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,6 +15,10 @@ public class Module {
     private boolean enabled;
     private String bind;
     private final List<Setting<?>> settings = new ArrayList<>();
+    private final MinecraftClient mc = MinecraftClient.getInstance();
+
+    // Flag to bypass chat check for config loading
+    private static boolean bypassChatCheck = false;
 
     public Module(String name, String description, Category category, String bind) {
         this.name = name;
@@ -29,9 +35,51 @@ public class Module {
         return setting;
     }
 
+    /**
+     * Check if chat is open
+     * @return true if chat is open, false otherwise
+     */
+    protected boolean isChatOpen() {
+        return mc != null && mc.currentScreen instanceof ChatScreen;
+    }
+
+    /**
+     * Method to enable/disable the chat check bypass
+     * Should be used when loading configs
+     */
+    public static void setBypassChatCheck(boolean bypass) {
+        bypassChatCheck = bypass;
+    }
+
+    /**
+     * Toggle the module's enabled state
+     */
     public void toggle() {
+        // Check if chat is open and we're not bypassing the check
+        if (isChatOpen() && !bypassChatCheck) {
+            System.out.println("Cannot toggle " + name + " while chat is open");
+            return;
+        }
+
         enabled = !enabled;
         System.out.println(name + " toggled to " + enabled);
+        if (enabled) {
+            onEnable();
+        } else {
+            onDisable();
+        }
+    }
+
+    /**
+     * Set the module's enabled state directly without checks
+     * For internal use only when loading config
+     */
+    public void setEnabled(boolean enabled) {
+        if (this.enabled == enabled) {
+            return; // No change needed
+        }
+
+        this.enabled = enabled;
         if (enabled) {
             onEnable();
         } else {

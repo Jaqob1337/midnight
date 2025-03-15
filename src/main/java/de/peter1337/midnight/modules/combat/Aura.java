@@ -15,21 +15,29 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.item.SwordItem;
+import net.minecraft.item.AxeItem;
+import net.minecraft.item.TridentItem;
+import net.minecraft.enchantment.EnchantmentHelper;
+import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Random;
 import java.util.stream.Collectors;
 
 public class Aura extends Module {
     private final MinecraftClient mc = MinecraftClient.getInstance();
+    private final Random random = new Random();
 
     // Current target entities
     private List<Entity> targetEntities = new ArrayList<>();
     private Entity primaryTarget = null;
+    private Entity lastTarget = null;
     private Vec3d targetPoint = null;
 
-    // Target motion tracking variables (defined at class level)
+    // Target motion tracking variables
     private double targetMovementSpeed = 0.0;
     private float targetDistance = 0.0f;
 
@@ -112,10 +120,17 @@ public class Aura extends Module {
 
     // Properties to track state
     private long lastAttackTime = 0;
+    private long lastPacketSentTime = 0;
     private boolean rotating = false;
     private float originalYaw;
     private float originalPitch;
     private boolean attackedThisTick = false;
+    private int comboHits = 0;
+    private long comboStartTime = 0;
+    private static final long MIN_PACKET_INTERVAL = 25; // Minimum time between packets in ms
+    private int criticalTicks = 0;
+    private boolean isCriticaling = false;
+    private Vec3d lastTargetPos = null;
 
     public Aura() {
         super("Aura", "Automatically attacks nearby entities", Category.COMBAT, "r");
@@ -125,10 +140,16 @@ public class Aura extends Module {
     public void onEnable() {
         targetEntities.clear();
         primaryTarget = null;
+        lastTarget = null;
         targetPoint = null;
         rotating = false;
         targetMovementSpeed = 0.0;
         targetDistance = 0.0f;
+        comboHits = 0;
+        comboStartTime = 0;
+        criticalTicks = 0;
+        isCriticaling = false;
+        lastTargetPos = null;
 
         if (mc.player != null) {
             originalYaw = mc.player.getYaw();
@@ -140,9 +161,15 @@ public class Aura extends Module {
     public void onDisable() {
         targetEntities.clear();
         primaryTarget = null;
+        lastTarget = null;
         targetPoint = null;
         targetMovementSpeed = 0.0;
         targetDistance = 0.0f;
+        comboHits = 0;
+        comboStartTime = 0;
+        criticalTicks = 0;
+        isCriticaling = false;
+        lastTargetPos = null;
 
         // Cancel rotations when disabling
         RotationHandler.cancelRotationByPriority(ROTATION_PRIORITY);
@@ -172,6 +199,11 @@ public class Aura extends Module {
     public void onUpdate() {
         if (!isEnabled() || mc.player == null || mc.world == null) return;
 
+        // Handle critical hit process
+        if (isCriticaling) {
+            handleCriticalProcess();
+        }
+
         // Skip attack logic if already processed in PRE tick
         if (attackedThisTick) {
             attackedThisTick = false; // Reset for next tick
@@ -190,13 +222,16 @@ public class Aura extends Module {
         long currentTime = System.currentTimeMillis();
         float baseDelay = 600.0f / cps.getValue(); // Convert CPS to milliseconds
 
-        // Add randomization if enabled (±30% variation)
+        // Add smart randomization to avoid patterns (always randomize slightly)
         long attackDelay;
         if (randomCps.getValue()) {
+            // More natural randomization (30% variation)
             float variation = baseDelay * 0.3f;
-            attackDelay = (long)(baseDelay + (Math.random() * variation * 2 - variation));
+            attackDelay = (long)(baseDelay + (random.nextDouble() * variation * 2 - variation));
         } else {
-            attackDelay = (long)baseDelay;
+            // Add minimal randomization even when setting is off (5% variation)
+            float variation = baseDelay * 0.05f;
+            attackDelay = (long)(baseDelay + (random.nextDouble() * variation * 2 - variation));
         }
 
         boolean canAttack = currentTime - lastAttackTime >= attackDelay;
@@ -232,6 +267,43 @@ public class Aura extends Module {
                 targetPoint = primaryTarget.getPos().add(0, primaryTarget.getHeight() / 2, 0);
             }
 
+            // Adjust attack timing for combo attacks
+            if (primaryTarget == lastTarget) {
+                // Target hasn't changed, consider this a combo
+                if (System.currentTimeMillis() - comboStartTime > 4000) {
+                    // Reset combo if too much time has passed
+                    comboHits = 0;
+                    comboStartTime = currentTime;
+                } else {
+                    // Natural combo timing: speed up initially then slow down
+                    if (comboHits == 1) {
+                        // First follow-up hit is quicker
+                        attackDelay = (long)(attackDelay * 0.8);
+                    } else if (comboHits == 2) {
+                        // Second follow-up continues combo
+                        attackDelay = (long)(attackDelay * 0.9);
+                    } else if (comboHits >= 3) {
+                        // After 3 hits, add a slight delay to avoid patterns
+                        attackDelay = (long)(attackDelay * 1.1);
+                        // Reset combo after a while
+                        if (comboHits >= 4 + random.nextInt(3)) {
+                            comboHits = 0;
+                        }
+                    }
+                }
+            } else {
+                // Target changed, reset combo
+                comboHits = 0;
+                comboStartTime = currentTime;
+                lastTarget = primaryTarget;
+            }
+
+            // Adjust timing based on target vulnerability
+            if (isTargetVulnerable(primaryTarget)) {
+                // Attack faster when target is vulnerable
+                attackDelay = (long)(attackDelay * 0.85);
+            }
+
             // Handle rotations to the primary target
             handleRotations();
 
@@ -257,21 +329,33 @@ public class Aura extends Module {
                 }
             }
 
-            // Attack if rotation is complete, cooldown is ready, and we can attack
-            if (canAttack && cooldownReady && RotationHandler.isRotationActive() && canHit) {
-                // Attack the primary target
-                attack(primaryTarget);
-                lastAttackTime = currentTime;
+            // Switch to best weapon before attacking if appropriate
 
-                // Handle auto-blocking if enabled
-                if (autoBlock.getValue()) {
-                    tryBlock();
+            // Attack if rotation is complete, cooldown is ready, and we can attack
+            if (canAttack && cooldownReady && RotationHandler.isRotationActive() && canHit && !isCriticaling) {
+                // Check for critical hit opportunity
+                boolean shouldCritical = shouldPerformCritical();
+
+                if (shouldCritical) {
+                    // Start critical hit sequence
+                    startCriticalAttack(primaryTarget);
+                } else {
+                    // Normal attack
+                    attack(primaryTarget);
+                    lastAttackTime = currentTime;
+                    comboHits++;
+
+                    // Handle auto-blocking if enabled
+                    if (autoBlock.getValue()) {
+                        tryBlock();
+                    }
                 }
             }
         } else {
             // No targets, cancel pending rotations
             RotationHandler.cancelRotationByPriority(ROTATION_PRIORITY);
             rotating = false;
+            resetCombo();
 
             // Rotate back to original position if enabled
             if (rotateBack.getValue() && mc.player != null) {
@@ -290,11 +374,21 @@ public class Aura extends Module {
         // Update target distance
         targetDistance = (float)mc.player.getPos().distanceTo(primaryTarget.getPos());
 
-        // Update movement speed
-        targetMovementSpeed = Math.sqrt(
-                Math.pow(primaryTarget.getX() - primaryTarget.prevX, 2) +
-                        Math.pow(primaryTarget.getZ() - primaryTarget.prevZ, 2)
-        );
+        // Calculate current movement speed
+        Vec3d currentPos = primaryTarget.getPos();
+        if (lastTargetPos != null) {
+            // Calculate actual movement over time for more accurate prediction
+            targetMovementSpeed = currentPos.distanceTo(lastTargetPos);
+        } else {
+            // Fallback calculation
+            targetMovementSpeed = Math.sqrt(
+                    Math.pow(primaryTarget.getX() - primaryTarget.prevX, 2) +
+                            Math.pow(primaryTarget.getZ() - primaryTarget.prevZ, 2)
+            );
+        }
+
+        // Store position for next tick
+        lastTargetPos = currentPos;
     }
 
     /**
@@ -322,6 +416,8 @@ public class Aura extends Module {
             if (entity instanceof PlayerEntity) {
                 if (!targetPlayers.getValue()) continue;
                 if (((PlayerEntity) entity).isSpectator()) continue;
+                // Skip friendslist players if a friend system exists
+                // if (FriendManager.isFriend(((PlayerEntity) entity).getName().getString())) continue;
             } else if (entity instanceof HostileEntity) {
                 if (!targetHostiles.getValue()) continue;
             } else if (entity instanceof PassiveEntity) {
@@ -400,21 +496,42 @@ public class Aura extends Module {
         // Apply predictive aiming if enabled
         if (visiblePoint != null && predictiveAim.getValue() && entity.distanceTo(mc.player) > 2.0) {
             // Calculate velocity of the target entity
-            Vec3d velocity = new Vec3d(
-                    entity.getX() - entity.prevX,
-                    entity.getY() - entity.prevY,
-                    entity.getZ() - entity.prevZ
-            );
+            double velocityX = entity.getX() - entity.prevX;
+            double velocityY = entity.getY() - entity.prevY;
+            double velocityZ = entity.getZ() - entity.prevZ;
 
-            // Only predict horizontal movement for more stable aiming
-            Vec3d prediction = new Vec3d(
-                    velocity.x * aimPrediction.getValue() * 10.0,
-                    velocity.y * aimPrediction.getValue() * 2.5, // Less vertical prediction
-                    velocity.z * aimPrediction.getValue() * 10.0
-            );
+            // Enhanced prediction using past positions for better trajectory estimation
+            if (lastTargetPos != null && targetMovementSpeed > 0.05) {
+                Vec3d currentPos = entity.getPos();
+                Vec3d direction = currentPos.subtract(lastTargetPos).normalize();
 
-            // Apply prediction to the visible point
-            visiblePoint = visiblePoint.add(prediction);
+                // Apply momentum-based prediction
+                float predictionStrength = aimPrediction.getValue();
+                // Scale prediction based on ping and target speed
+                float pingFactor = 1.0f; // Ideally would be adjusted based on ping
+                float speedMultiplier = (float) Math.min(1.0, targetMovementSpeed * 5);
+                predictionStrength *= pingFactor * speedMultiplier;
+
+                // Create a more accurate prediction for moving targets
+                Vec3d prediction = new Vec3d(
+                        direction.x * predictionStrength * 10.0,
+                        Math.min(Math.abs(direction.y), 0.1) * Math.signum(direction.y) * predictionStrength * 5.0, // Limit vertical prediction
+                        direction.z * predictionStrength * 10.0
+                );
+
+                // Apply prediction to the visible point
+                visiblePoint = visiblePoint.add(prediction);
+            } else {
+                // Fallback to basic prediction
+                Vec3d prediction = new Vec3d(
+                        velocityX * aimPrediction.getValue() * 10.0,
+                        velocityY * aimPrediction.getValue() * 2.5, // Less vertical prediction
+                        velocityZ * aimPrediction.getValue() * 10.0
+                );
+
+                // Apply prediction to the visible point
+                visiblePoint = visiblePoint.add(prediction);
+            }
 
             // Make sure the prediction still aims at the entity's hitbox
             Box expandedBox = entity.getBoundingBox().expand(0.4); // Slightly expand hitbox for prediction tolerance
@@ -433,7 +550,7 @@ public class Aura extends Module {
     }
 
     /**
-     * Handles rotations to the primary target
+     * Handles rotations to the primary target with advanced humanization
      */
     private void handleRotations() {
         if (primaryTarget == null || targetPoint == null) return;
@@ -441,18 +558,35 @@ public class Aura extends Module {
         // Calculate rotation speed based on target metrics
         float speedMultiplier = rotationSpeed.getValue();
 
-        // Increase speed for fast-moving targets
+        // Adjust speed based on target movement and distance
         if (targetMovementSpeed > 0.1) {
-            speedMultiplier = Math.min(1.0f, speedMultiplier * 1.5f);
+            // Faster rotations for moving targets
+            speedMultiplier = Math.min(1.0f, speedMultiplier * (1.0f + (float)targetMovementSpeed * 2.0f));
         }
 
-        // Decrease smoothing at close range for more responsive rotations
         if (targetDistance < 3.0f) {
+            // Faster rotations at close range
             speedMultiplier = Math.min(1.0f, speedMultiplier * 1.3f);
         }
 
+        // Add slight randomization to rotation speed to avoid patterns
+        speedMultiplier *= (0.95f + random.nextFloat() * 0.1f);
+
         // Calculate the rotations to the target point
         float[] rotations = RotationHandler.calculateLookAt(targetPoint);
+
+        // Add minor jitter to rotations for more human-like movements
+        float jitterAmount = 0.3f;
+        if (speedMultiplier > 0.7f) {
+            // More jitter for faster rotations
+            jitterAmount = 0.5f;
+        }
+
+        // Only add jitter randomly to break patterns
+        if (random.nextFloat() < 0.7f) {
+            rotations[0] += (random.nextFloat() - 0.5f) * jitterAmount;
+            rotations[1] += (random.nextFloat() - 0.5f) * jitterAmount * 0.5f; // Less jitter for pitch
+        }
 
         // Determine rotation mode parameters
         boolean silent;
@@ -523,14 +657,30 @@ public class Aura extends Module {
     }
 
     /**
-     * Attacks the target entity
+     * Attacks the target entity with optimized packet timing
      */
     private void attack(Entity target) {
+        if (mc.player == null || mc.interactionManager == null) return;
+
         // Make sure we're still in range
         if (mc.player.distanceTo(target) <= range.getValue()) {
-            mc.interactionManager.attackEntity(mc.player, target);
-            mc.player.swingHand(Hand.MAIN_HAND);
+            long currentTime = System.currentTimeMillis();
+
+            // Ensure we don't send packets too frequently (avoid packet spam detection)
+            if (currentTime - lastPacketSentTime >= MIN_PACKET_INTERVAL) {
+                mc.interactionManager.attackEntity(mc.player, target);
+                mc.player.swingHand(Hand.MAIN_HAND);
+                lastPacketSentTime = currentTime;
+            }
         }
+    }
+
+    /**
+     * Resets the combo counter
+     */
+    private void resetCombo() {
+        comboHits = 0;
+        comboStartTime = 0;
     }
 
     /**
@@ -556,4 +706,90 @@ public class Aura extends Module {
             }).start();
         }
     }
-}
+
+    /**
+     * Checks if we should perform a critical hit
+     */
+    private boolean shouldPerformCritical() {
+        // Check if player can perform a critical hit
+        if (mc.player == null) return false;
+
+        // Don't critical when already in the process
+        if (isCriticaling) return false;
+
+        // Basic conditions for critical hits
+        boolean canCritical = mc.player.isOnGround() &&
+                !mc.player.isInLava() &&
+                !mc.player.isTouchingWater() &&
+                !mc.player.hasStatusEffect(net.minecraft.entity.effect.StatusEffects.BLINDNESS) &&
+                !mc.player.hasVehicle();
+
+        // Only critical sometimes to avoid patterns (70% chance)
+        return canCritical && random.nextFloat() < 0.7f;
+    }
+
+    /**
+     * Starts a critical hit sequence
+     */
+    private void startCriticalAttack(Entity target) {
+        if (!isCriticaling) {
+            isCriticaling = true;
+            criticalTicks = 0;
+            // Store target for the critical sequence
+            lastTarget = target;
+        }
+    }
+
+    /**
+     * Handles the critical hit process over multiple ticks
+     */
+    private void handleCriticalProcess() {
+        if (!isCriticaling || mc.player == null || lastTarget == null) {
+            isCriticaling = false;
+            return;
+        }
+
+        criticalTicks++;
+
+        // Execute critical packet sequence
+        if (criticalTicks == 1) {
+            // First tick: Send position packets
+        } else if (criticalTicks == 2) {
+            // Second tick: Execute the attack
+            attack(lastTarget);
+            lastAttackTime = System.currentTimeMillis();
+            comboHits++;
+            isCriticaling = false;
+
+            // Handle auto-blocking if enabled
+            if (autoBlock.getValue()) {
+                tryBlock();
+            }
+        }
+    }
+
+
+
+    /**
+     * Checks if the target is in a vulnerable state for increased damage
+     */
+    private boolean isTargetVulnerable(Entity target) {
+        if (!(target instanceof LivingEntity livingTarget)) return false;
+
+        // Check if target is in vulnerable state
+        boolean isJumping = !livingTarget.isOnGround() && livingTarget.getVelocity().y > 0;
+        boolean isSlowed = livingTarget.hasStatusEffect(net.minecraft.entity.effect.StatusEffects.SLOWNESS);
+        boolean isLowHealth = livingTarget instanceof PlayerEntity &&
+                ((PlayerEntity)livingTarget).getHealth() < 6.0f;
+        boolean isRegenerating = livingTarget.hasStatusEffect(net.minecraft.entity.effect.StatusEffects.REGENERATION);
+        boolean isEating = livingTarget instanceof PlayerEntity &&
+                ((PlayerEntity)livingTarget).isUsingItem();
+
+        return isJumping || isSlowed || isLowHealth || (isRegenerating && isLowHealth) || isEating;
+    }
+
+    /**
+     * Switches to the optimal weapon for combat if available
+     */
+
+    }
