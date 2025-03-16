@@ -15,8 +15,6 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -37,16 +35,34 @@ public class Aura extends Module {
     private double targetMovementSpeed = 0.0;
     private float targetDistance = 0.0f;
 
+    // For mouse movement tracking
+    private float lastPlayerYaw = 0;
+    private float lastPlayerPitch = 0;
+
     // The rotation priority for this module
     private static final int ROTATION_PRIORITY = 100;
 
+    // Last position to prevent target switching/flickering
+    private Vec3d lastTargetPos = null;
+    private long lastTargetPosTime = 0;
+    private static final long TARGET_POS_TIMEOUT = 100; // ms
+
+    // Track mouse movement to simulate more natural rotations
+    private boolean playerMovedMouse = false;
+    private long lastMouseMovedTime = 0;
+
+    // Add these as class fields
+    private boolean wasBlocking = false;
+    private int blockReleaseDelay = 0;
+    private int blockPressTicks = 0;
+
     // Settings
     private final Setting<Float> range = register(
-            new Setting<>("Range", 4.0f, 1.0f, 6.0f, "Attack range in blocks")
+            new Setting<>("Range", 3.5f, 1.0f, 6.0f, "Attack range in blocks")
     );
 
     private final Setting<Float> cps = register(
-            new Setting<>("CPS", 10.0f, 1.0f, 20.0f, "Clicks per second")
+            new Setting<>("CPS", 8.0f, 1.0f, 20.0f, "Clicks per second")
     );
 
     private final Setting<Boolean> randomCps = register(
@@ -78,16 +94,18 @@ public class Aura extends Module {
     );
 
     private final Setting<Float> rotationSpeed = register(
-            new Setting<>("RotationSpeed", 0.7f, 0.1f, 1.0f, "Rotation speed factor")
+            new Setting<>("RotationSpeed", 0.5f, 0.1f, 1.0f, "Rotation speed factor")
     );
 
-    private final Setting<Boolean> predictiveAim = register(
-            new Setting<>("PredictiveAim", Boolean.TRUE, "Predict target movement for more accurate rotations")
+    private final Setting<Boolean> autoBlock = register(
+            new Setting<>("AutoBlock", Boolean.FALSE, "Automatically block with right mouse button")
     );
 
-    private final Setting<Float> aimPrediction = register(
-            new Setting<>("AimPrediction", 0.5f, 0.1f, 2.0f, "Prediction strength for target movement")
-                    .dependsOn(predictiveAim)
+    private final Setting<String> blockMode = register(
+            new Setting<>("BlockMode", "Hold",
+                    List.of("Hold"),
+                    "How to perform auto-blocking")
+                    .dependsOn(autoBlock)
     );
 
     private final Setting<Boolean> throughWalls = register(
@@ -98,107 +116,32 @@ public class Aura extends Module {
             new Setting<>("RayTrace", Boolean.TRUE, "Only attack if server rotations are looking at the target")
     );
 
-    private final Setting<Boolean> autoBlock = register(
-            new Setting<>("AutoBlock", Boolean.FALSE, "Automatically block with shield")
-    );
-
     private final Setting<Boolean> smartAttack = register(
             new Setting<>("SmartAttack", Boolean.TRUE, "Only attack when your weapon is fully charged")
     );
 
-    private final Setting<Boolean> rotateBack = register(
-            new Setting<>("RotateBack", Boolean.FALSE, "Rotate back to original position after attacking")
-    );
+
 
     private final Setting<Float> fovCheck = register(
             new Setting<>("FOVCheck", 180f, 30f, 360f, "Field of view angle for target visibility")
     );
 
-    // High ping specific settings
-    private final Setting<Boolean> pingCompensation = register(
-            new Setting<>("PingCompensation", Boolean.TRUE, "Adjust timing for high ping")
-    );
 
-    private final Setting<Integer> pingEstimate = register(
-            new Setting<>("PingEstimate", 150, 0, 1000, "Your estimated ping in milliseconds")
-                    .dependsOn(pingCompensation)
-    );
-
-    private final Setting<Boolean> predictPosition = register(
-            new Setting<>("PredictPosition", Boolean.TRUE, "Predict where target will be based on ping")
-                    .dependsOn(pingCompensation)
-    );
-
-    private final Setting<Boolean> preAttack = register(
-            new Setting<>("PreAttack", Boolean.TRUE, "Start attack sequence earlier based on ping")
-                    .dependsOn(pingCompensation)
-    );
-
-    private final Setting<Boolean> extraPackets = register(
-            new Setting<>("ExtraPackets", Boolean.TRUE, "Send additional attack packets for high ping")
-                    .dependsOn(pingCompensation)
-    );
-
-    private final Setting<Integer> packetMultiplier = register(
-            new Setting<>("PacketMultiplier", 2, 1, 5, "How many extra packets to send")
-                    .dependsOn(extraPackets)
-    );
-
-    private final Setting<Integer> targetHistorySize = register(
-            new Setting<>("TargetHistorySize", 3, 1, 10, "How many past targets to remember")
-    );
 
     // Properties to track state
     private long lastAttackTime = 0;
-    private long lastPacketSentTime = 0;
     private boolean rotating = false;
     private float originalYaw;
     private float originalPitch;
     private boolean attackedThisTick = false;
-    private int comboHits = 0;
-    private long comboStartTime = 0;
-    private static final long MIN_PACKET_INTERVAL = 25; // Minimum time between packets in ms
-    private int criticalTicks = 0;
-    private boolean isCriticaling = false;
-    private Vec3d lastTargetPos = null;
-
-    // High ping specific variables
-    private List<TargetHistory> targetHistory = new ArrayList<>();
-    private long lastAttackPacketTime = 0;
-    private boolean isAttackConfirmed = false;
-    private int attackTimeoutCounter = 0;
-    private static final int MAX_ATTACK_TIMEOUT = 20; // 1 second timeout (20 ticks)
-    private List<TargetRequest> pendingAttacks = new ArrayList<>();
-
-    // Store entity health to detect successful hits
-    private class TargetHistory {
-        Entity entity;
-        float lastHealth;
-        long timestamp;
-
-        public TargetHistory(Entity entity, float health) {
-            this.entity = entity;
-            this.lastHealth = health;
-            this.timestamp = System.currentTimeMillis();
-        }
-    }
-
-    // For high-ping, track attack requests
-    private class TargetRequest {
-        Entity entity;
-        long timestamp;
-        boolean processed;
-
-        public TargetRequest(Entity entity) {
-            this.entity = entity;
-            this.timestamp = System.currentTimeMillis();
-            this.processed = false;
-        }
-    }
 
     public Aura() {
         super("Aura", "Automatically attacks nearby entities", Category.COMBAT, "r");
     }
+
+    // For pre-aim behavior switching
+    private long preAimStartTime = 0;
+    private Entity preAimTarget = null;
 
     @Override
     public void onEnable() {
@@ -209,15 +152,8 @@ public class Aura extends Module {
         rotating = false;
         targetMovementSpeed = 0.0;
         targetDistance = 0.0f;
-        comboHits = 0;
-        comboStartTime = 0;
-        criticalTicks = 0;
-        isCriticaling = false;
-        lastTargetPos = null;
-        targetHistory.clear();
-        isAttackConfirmed = false;
-        attackTimeoutCounter = 0;
-        pendingAttacks.clear();
+        preAimStartTime = 0;
+        preAimTarget = null;
 
         if (mc.player != null) {
             originalYaw = mc.player.getYaw();
@@ -233,32 +169,29 @@ public class Aura extends Module {
         targetPoint = null;
         targetMovementSpeed = 0.0;
         targetDistance = 0.0f;
-        comboHits = 0;
-        comboStartTime = 0;
-        criticalTicks = 0;
-        isCriticaling = false;
-        lastTargetPos = null;
-        targetHistory.clear();
-        isAttackConfirmed = false;
-        attackTimeoutCounter = 0;
-        pendingAttacks.clear();
+        preAimStartTime = 0;
+        preAimTarget = null;
+
+        // Force release immediately on disable
+        if (mc.options != null) {
+            // Always release when disabling, regardless of internal state
+            mc.options.useKey.setPressed(false);
+            wasBlocking = false;
+            blockReleaseDelay = 0;
+            blockPressTicks = 0;
+        }
 
         // Cancel rotations when disabling
         RotationHandler.cancelRotationByPriority(ROTATION_PRIORITY);
         rotating = false;
-
-        // Rotate back to original position if enabled
-        if (rotateBack.getValue() && mc.player != null) {
-            mc.player.setYaw(originalYaw);
-            mc.player.setPitch(originalPitch);
-        }
     }
 
-    /**
-     * Method called during START_CLIENT_TICK
-     */
+    // Make sure the preUpdate method calls updateAutoBlock too
     public void preUpdate() {
         if (!isEnabled() || mc.player == null || mc.world == null) return;
+
+        // Update autoblock state in preUpdate too for more responsive handling
+        updateAutoBlock();
 
         // Process attack logic in PRE tick
         processAttack();
@@ -267,14 +200,13 @@ public class Aura extends Module {
         attackedThisTick = true;
     }
 
+    /**
+     * Method called during START_CLIENT_TICK
+     */
+
     @Override
     public void onUpdate() {
         if (!isEnabled() || mc.player == null || mc.world == null) return;
-
-        // Handle critical hit process
-        if (isCriticaling) {
-            handleCriticalProcess();
-        }
 
         // Skip attack logic if already processed in PRE tick
         if (attackedThisTick) {
@@ -282,102 +214,108 @@ public class Aura extends Module {
             return;
         }
 
+        // Track if player has moved their mouse (for more natural rotations)
+        if (mc.player != null) {
+            float currentYaw = mc.player.getYaw();
+            float currentPitch = mc.player.getPitch();
+
+            if (Math.abs(currentYaw - lastPlayerYaw) > 0.1f ||
+                    Math.abs(currentPitch - lastPlayerPitch) > 0.1f) {
+                playerMovedMouse = true;
+                lastMouseMovedTime = System.currentTimeMillis();
+            } else if (System.currentTimeMillis() - lastMouseMovedTime > 500) {
+                playerMovedMouse = false;
+            }
+
+            lastPlayerYaw = currentYaw;
+            lastPlayerPitch = currentPitch;
+        }
+
         // Process attack logic in POST tick if not already done in PRE
         processAttack();
 
-        // Check if we've successfully hit a target
-        checkHitConfirmation();
-
-        // Process pending attacks (for high-ping compensation)
-        processPendingAttacks();
-
-        // Handle attack timeout (for high ping situations)
-        if (!isAttackConfirmed && primaryTarget != null && attackTimeoutCounter > 0) {
-            attackTimeoutCounter--;
-
-            // If we've waited too long for hit confirmation, try again
-            if (attackTimeoutCounter <= 0 && pingCompensation.getValue()) {
-                // Re-attempt attack if no confirmation came through
-                if (primaryTarget instanceof LivingEntity) {
-                    if (preAttack.getValue()) {
-                        requestAttack(primaryTarget);
-                        lastAttackTime = System.currentTimeMillis();
-                    }
-                }
-            }
+        // Clean up stale target position tracking
+        if (System.currentTimeMillis() - lastTargetPosTime > TARGET_POS_TIMEOUT) {
+            lastTargetPos = null;
         }
+
+        // Handle auto-block when no targets or out of range
+        updateAutoBlock();
     }
 
     /**
-     * Process pending attack requests
+     * Manages the auto-block feature, ensuring blocking stops when no valid targets exist
      */
-    private void processPendingAttacks() {
-        if (!pingCompensation.getValue() || !extraPackets.getValue()) {
-            pendingAttacks.clear();
+    /**
+     * Manages the auto-block feature, ensuring blocking stops when no valid targets exist
+     * or when not actively attacking
+     */
+    private void updateAutoBlock() {
+        if (mc.options == null) return;
+
+        // Handle block release with delay
+        if (blockReleaseDelay > 0) {
+            blockReleaseDelay--;
+            if (blockReleaseDelay == 0) {
+                // Force release the key
+                mc.options.useKey.setPressed(false);
+                wasBlocking = false;
+            }
             return;
         }
 
-        long currentTime = System.currentTimeMillis();
+        // If module not enabled or autoblock not enabled, release block and return
+        if (!isEnabled() || !autoBlock.getValue()) {
+            if (wasBlocking) {
+                // Schedule key release
+                mc.options.useKey.setPressed(false);
+                wasBlocking = false;
+            }
+            return;
+        }
 
-        // Remove old requests
-        pendingAttacks.removeIf(request -> currentTime - request.timestamp > 2000);
+        boolean shouldBlock = false;
 
-        // Process unprocessed requests
-        for (TargetRequest request : pendingAttacks) {
-            if (!request.processed && request.entity != null && !request.entity.isRemoved() &&
-                    request.entity instanceof LivingEntity && ((LivingEntity) request.entity).getHealth() > 0) {
+        // Check if we have a valid target
+        if (primaryTarget != null &&
+                !primaryTarget.isRemoved() &&
+                primaryTarget instanceof LivingEntity living &&
+                living.getHealth() > 0 &&
+                mc.player.distanceTo(primaryTarget) <= range.getValue() * 1.5) {
 
-                // Send packet directly
-                directAttack(request.entity);
-                request.processed = true;
+            // Only block if we've recently attacked or are about to
+            long timeSinceAttack = System.currentTimeMillis() - lastAttackTime;
+            if (timeSinceAttack < 500) {
+                shouldBlock = true;
             }
         }
-    }
 
-    /**
-     * Check if our attacks actually landed by monitoring target health
-     */
-    private void checkHitConfirmation() {
-        // Remove old entries from history
-        long currentTime = System.currentTimeMillis();
-        targetHistory.removeIf(entry -> currentTime - entry.timestamp > 2000); // 2 second timeout
+        // If no targets at all, force turn off blocking
+        if (targetEntities.isEmpty() || primaryTarget == null) {
+            shouldBlock = false;
+        }
 
-        // Check for hit confirmation
-        if (primaryTarget instanceof LivingEntity livingTarget) {
-            float currentHealth = livingTarget.getHealth();
+        // Manage key press state changes
+        if (shouldBlock && !wasBlocking) {
+            // Start blocking
+            mc.options.useKey.setPressed(true);
+            wasBlocking = true;
+            blockPressTicks = 0;
+        } else if (!shouldBlock && wasBlocking) {
+            // Schedule block release with short delay
+            blockReleaseDelay = 2; // 2 ticks delay before release
+        }
 
-            // Check if this target is in our history
-            for (TargetHistory entry : targetHistory) {
-                if (entry.entity == primaryTarget && entry.lastHealth > currentHealth) {
-                    // We've confirmed a hit!
-                    isAttackConfirmed = true;
-                    attackTimeoutCounter = 0;
+        // Keep track of how long we've been blocking
+        if (wasBlocking) {
+            blockPressTicks++;
 
-                    // Update the health in history
-                    entry.lastHealth = currentHealth;
-                    entry.timestamp = currentTime;
-                    return;
-                }
-            }
-
-            // Add target to history if not already there
-            boolean found = false;
-            for (TargetHistory entry : targetHistory) {
-                if (entry.entity == primaryTarget) {
-                    entry.lastHealth = currentHealth;
-                    entry.timestamp = currentTime;
-                    found = true;
-                    break;
-                }
-            }
-
-            if (!found) {
-                targetHistory.add(new TargetHistory(primaryTarget, currentHealth));
-
-                // Limit history size
-                while (targetHistory.size() > targetHistorySize.getValue()) {
-                    targetHistory.remove(0);
-                }
+            // Safety check: force-release after a certain time even if we think we should block
+            // This prevents stuck keys if something goes wrong with state tracking
+            if (blockPressTicks > 80) { // 4 seconds at 20 ticks/sec
+                mc.options.useKey.setPressed(false);
+                wasBlocking = false;
+                blockPressTicks = 0;
             }
         }
     }
@@ -390,18 +328,11 @@ public class Aura extends Module {
         long currentTime = System.currentTimeMillis();
         float baseDelay = 1000.0f / cps.getValue(); // Convert CPS to milliseconds
 
-        // Apply ping compensation to attack timing
-        if (pingCompensation.getValue()) {
-            // If ping is high, we need to reduce delay to compensate
-            float pingFactor = 1.0f - MathHelper.clamp(pingEstimate.getValue() / 2000.0f, 0.0f, 0.5f);
-            baseDelay *= pingFactor;
-        }
-
-        // Add smart randomization to avoid patterns (always randomize slightly)
+        // Add smart randomization to avoid patterns
         long attackDelay;
         if (randomCps.getValue()) {
-            // More natural randomization (30% variation)
-            float variation = baseDelay * 0.3f;
+            // More natural randomization (20% variation)
+            float variation = baseDelay * 0.2f;
             attackDelay = (long)(baseDelay + (random.nextDouble() * variation * 2 - variation));
         } else {
             // Add minimal randomization even when setting is off (5% variation)
@@ -429,13 +360,8 @@ public class Aura extends Module {
             float cooldownProgress = mc.player.getAttackCooldownProgress(0.0f);
             boolean cooldownReady = !smartAttack.getValue() || cooldownProgress >= 0.9f;
 
-            // Apply ping compensation for target position
-            if (pingCompensation.getValue() && predictPosition.getValue()) {
-                predictTargetPosition();
-            } else {
-                // Find a visible point on the target to aim at
-                targetPoint = findVisiblePoint(primaryTarget);
-            }
+            // Find a visible point on the target to aim at
+            targetPoint = findVisiblePoint(primaryTarget);
 
             // If no visible point and we're not allowed to attack through walls, skip
             if (targetPoint == null && !throughWalls.getValue()) {
@@ -447,46 +373,13 @@ public class Aura extends Module {
                 targetPoint = primaryTarget.getPos().add(0, primaryTarget.getHeight() / 2, 0);
             }
 
-            // Adjust attack timing for combo attacks
-            if (primaryTarget == lastTarget) {
-                // Target hasn't changed, consider this a combo
-                if (System.currentTimeMillis() - comboStartTime > 4000) {
-                    // Reset combo if too much time has passed
-                    comboHits = 0;
-                    comboStartTime = currentTime;
-                } else {
-                    // Natural combo timing: speed up initially then slow down
-                    if (comboHits == 1) {
-                        // First follow-up hit is quicker
-                        attackDelay = (long)(attackDelay * 0.8);
-                    } else if (comboHits == 2) {
-                        // Second follow-up continues combo
-                        attackDelay = (long)(attackDelay * 0.9);
-                    } else if (comboHits >= 3) {
-                        // After 3 hits, add a slight delay to avoid patterns
-                        attackDelay = (long)(attackDelay * 1.1);
-                        // Reset combo after a while
-                        if (comboHits >= 4 + random.nextInt(3)) {
-                            comboHits = 0;
-                        }
-                    }
-                }
-            } else {
-                // Target changed, reset combo
-                comboHits = 0;
-                comboStartTime = currentTime;
-                lastTarget = primaryTarget;
-                isAttackConfirmed = false;
-            }
+            // Implement preaiming - start rotating to target before attack is ready
+            boolean shouldPreAim = shouldPerformPreAim(canAttack, cooldownProgress);
 
-            // Adjust timing based on target vulnerability
-            if (isTargetVulnerable(primaryTarget)) {
-                // Attack faster when target is vulnerable
-                attackDelay = (long)(attackDelay * 0.85);
+            if (shouldPreAim) {
+                // Handle rotations early - this is the pre-aiming logic
+                handleRotations();
             }
-
-            // Handle rotations to the primary target
-            handleRotations();
 
             // Validate that the server rotations are actually looking at the entity if rayTrace is enabled
             boolean canHit = true;
@@ -494,141 +387,80 @@ public class Aura extends Module {
                 float serverYaw = RotationHandler.getServerYaw();
                 float serverPitch = RotationHandler.getServerPitch();
 
-                // Use a more tolerant raytrace for fast-moving targets
-                if (targetMovementSpeed > 0.15) {
-                    // Create a slightly expanded hitbox for fast-moving targets
-                    Box expandedBox = primaryTarget.getBoundingBox().expand(0.2);
-                    Vec3d eyePos = mc.player.getEyePos();
-                    Vec3d lookVec = RaytraceUtil.getVectorForRotation(serverPitch, serverYaw);
-                    Vec3d endPos = eyePos.add(lookVec.multiply(range.getValue() + 1));
+                // Create a slightly expanded hitbox for better hit registration
+                Box expandedBox = primaryTarget.getBoundingBox().expand(0.1);
+                Vec3d eyePos = mc.player.getEyePos();
+                Vec3d lookVec = RaytraceUtil.getVectorForRotation(serverPitch, serverYaw);
+                Vec3d endPos = eyePos.add(lookVec.multiply(range.getValue() + 1));
 
-                    // Check if rotations would hit the expanded hitbox
-                    canHit = RaytraceUtil.rayTraceEntityBox(eyePos, endPos, expandedBox) != null;
-                } else {
-                    // Normal raytrace for slower targets
-                    canHit = RaytraceUtil.isEntityInServerView(primaryTarget, serverYaw, serverPitch, range.getValue() + 1);
-                }
+                // Check if rotations would hit the expanded hitbox
+                canHit = RaytraceUtil.rayTraceEntityBox(eyePos, endPos, expandedBox) != null;
             }
 
             // Attack if rotation is complete, cooldown is ready, and we can attack
-            if (canAttack && cooldownReady && RotationHandler.isRotationActive() && canHit && !isCriticaling) {
-                // For high ping, we need to be more careful about when to start attack animations
-                if (pingCompensation.getValue() && preAttack.getValue()) {
-                    // Start attack process earlier for high ping
-                    attackTimeoutCounter = MAX_ATTACK_TIMEOUT;
-                    isAttackConfirmed = false;
+            if (canAttack && cooldownReady && RotationHandler.isRotationActive() && canHit) {
+                // If we haven't pre-aimed yet, do final rotation adjustment
+                if (!shouldPreAim) {
+                    handleRotations();
                 }
 
-                // Check for critical hit opportunity
-                boolean shouldCritical = shouldPerformCritical();
-
-                if (shouldCritical) {
-                    // Start critical hit sequence
-                    startCriticalAttack(primaryTarget);
-                } else {
-                    // Request the attack (possibly multiple packets for high ping)
-                    requestAttack(primaryTarget);
-                    lastAttackTime = currentTime;
-                    comboHits++;
-
-                    // Handle auto-blocking if enabled
-                    if (autoBlock.getValue()) {
-                        tryBlock();
-                    }
-                }
+                // Perform the attack
+                attack(primaryTarget);
+                lastAttackTime = currentTime;
+                lastTarget = primaryTarget;
             }
         } else {
             // No targets, cancel pending rotations
             RotationHandler.cancelRotationByPriority(ROTATION_PRIORITY);
             rotating = false;
-            resetCombo();
 
-            // Rotate back to original position if enabled
-            if (rotateBack.getValue() && mc.player != null) {
-                mc.player.setYaw(originalYaw);
-                mc.player.setPitch(originalPitch);
-            }
         }
     }
 
     /**
-     * Request an attack on a target, with extra packets for high ping
+     * Determines whether to start rotating early (pre-aiming)
+     * based on cooldown progress, target metrics, and time until next attack
      */
-    private void requestAttack(Entity target) {
-        if (target == null || mc.player == null) return;
-
-        // Always perform the normal attack
-        attack(target);
-
-        // For high ping, possibly send additional attack packets
-        if (pingCompensation.getValue() && extraPackets.getValue() && packetMultiplier.getValue() > 1) {
-            // Add to pending attacks for processing in upcoming ticks
-            pendingAttacks.add(new TargetRequest(target));
-
-            // Also send some immediate extra packets
-            for (int i = 1; i < packetMultiplier.getValue(); i++) {
-                if (random.nextFloat() < 0.7f) {  // 70% chance to send each extra packet
-                    directAttack(target);
-                }
-            }
-        }
-    }
-
-    /**
-     * Send attack packet directly without animation
-     */
-    private void directAttack(Entity target) {
-        if (mc.player == null || mc.interactionManager == null || target == null) return;
-
-        // Send the attack packet directly without animation
-        if (System.currentTimeMillis() - lastPacketSentTime >= MIN_PACKET_INTERVAL) {
-            mc.interactionManager.attackEntity(mc.player, target);
-            lastPacketSentTime = System.currentTimeMillis();
-        }
-    }
-
-    /**
-     * Predict where the target will be after ping delay
-     */
-    private void predictTargetPosition() {
-        if (primaryTarget == null || lastTargetPos == null) {
-            targetPoint = findVisiblePoint(primaryTarget);
-            return;
+    private boolean shouldPerformPreAim(boolean canAttackNow, float cooldownProgress) {
+        if (canAttackNow) {
+            // If we can attack now, no need for pre-aim
+            return true;
         }
 
-        // Calculate current velocity vector
-        Vec3d currentPos = primaryTarget.getPos();
-        Vec3d velocity = currentPos.subtract(lastTargetPos);
+        long timeUntilNextAttack = (long)(1000.0f / cps.getValue() * (1.0f - cooldownProgress));
 
-        // Scale velocity by ping (convert ms to seconds)
-        float pingSeconds = pingEstimate.getValue() / 1000.0f;
+        // Start preaiming earlier for moving targets and farther targets
+        float preAimThreshold = 200f; // Base threshold in ms
 
-        // Predict future position based on current velocity and ping
-        Vec3d predictedPos = currentPos.add(
-                velocity.x * pingSeconds * 15.0,
-                Math.max(-0.5, Math.min(0.5, velocity.y * pingSeconds * 10.0)), // Limit vertical prediction
-                velocity.z * pingSeconds * 15.0
-        );
-
-        // Check if predicted position is reasonable (not too far)
-        double maxPredictDistance = 5.0;
-        if (predictedPos.distanceTo(currentPos) > maxPredictDistance) {
-            // Limit the prediction distance
-            Vec3d direction = predictedPos.subtract(currentPos).normalize();
-            predictedPos = currentPos.add(direction.multiply(maxPredictDistance));
+        // Adjust for target movement - faster targets need earlier pre-aim
+        if (targetMovementSpeed > 0.1) {
+            preAimThreshold += targetMovementSpeed * 300f; // Up to 300ms earlier for fast targets
         }
 
-        // Now try to find a visible point at this predicted position
-        Vec3d visiblePoint = RaytraceUtil.getVisiblePoint(primaryTarget);
-
-        // If we can get a visible point, offset it by our prediction
-        if (visiblePoint != null) {
-            Vec3d offset = predictedPos.subtract(currentPos);
-            targetPoint = visiblePoint.add(offset);
-        } else {
-            // Fallback to direct predicted position
-            targetPoint = predictedPos.add(0, primaryTarget.getHeight() / 2, 0);
+        // Adjust for distance - further targets need more lead time
+        if (targetDistance > 3.0f) {
+            preAimThreshold += (targetDistance - 3.0f) * 50f; // 50ms per block beyond 3 blocks
         }
+
+        // Adjust based on angle difference between current rotation and target
+        if (mc.player != null && targetPoint != null) {
+            float[] targetRotations = RotationHandler.calculateLookAt(targetPoint);
+            float currentYaw = mc.player.getYaw();
+            float currentPitch = mc.player.getPitch();
+
+            float yawDiff = Math.abs(MathHelper.wrapDegrees(targetRotations[0] - currentYaw));
+            float pitchDiff = Math.abs(targetRotations[1] - currentPitch);
+
+            // More pre-aim time for larger angle differences
+            float angleDiffFactor = (yawDiff + pitchDiff) / 10.0f; // Scale appropriately
+            preAimThreshold += angleDiffFactor * 50.0f; // Up to 50ms per 10 degrees
+        }
+
+        // Add randomization to make behavior less predictable
+        preAimThreshold *= 0.8f + random.nextFloat() * 0.4f; // 80% to 120% variation
+
+        // Return true if we're within the threshold time before next attack
+        return timeUntilNextAttack <= preAimThreshold;
     }
 
     /**
@@ -641,20 +473,21 @@ public class Aura extends Module {
         targetDistance = (float)mc.player.getPos().distanceTo(primaryTarget.getPos());
 
         // Calculate current movement speed
-        Vec3d currentPos = primaryTarget.getPos();
-        if (lastTargetPos != null) {
-            // Calculate actual movement over time for more accurate prediction
-            targetMovementSpeed = currentPos.distanceTo(lastTargetPos);
-        } else {
-            // Fallback calculation
-            targetMovementSpeed = Math.sqrt(
-                    Math.pow(primaryTarget.getX() - primaryTarget.prevX, 2) +
-                            Math.pow(primaryTarget.getZ() - primaryTarget.prevZ, 2)
-            );
-        }
+        targetMovementSpeed = Math.sqrt(
+                Math.pow(primaryTarget.getX() - primaryTarget.prevX, 2) +
+                        Math.pow(primaryTarget.getZ() - primaryTarget.prevZ, 2)
+        );
 
-        // Store position for next tick
-        lastTargetPos = currentPos;
+        // Update lastTargetPos for tracking
+        lastTargetPos = primaryTarget.getPos();
+        lastTargetPosTime = System.currentTimeMillis();
+
+        // Track pre-aim switching for natural aim transitions
+        if (preAimTarget != primaryTarget) {
+            // We've switched targets, record this for varied rotation behavior
+            preAimTarget = primaryTarget;
+            preAimStartTime = System.currentTimeMillis();
+        }
     }
 
     /**
@@ -669,12 +502,6 @@ public class Aura extends Module {
 
         List<Entity> potentialTargets = new ArrayList<>();
         double rangeSq = range.getValue() * range.getValue();
-
-        // For high ping, increase effective range slightly to compensate for movement delay
-        if (pingCompensation.getValue()) {
-            float pingRangeBonus = Math.min(2.0f, pingEstimate.getValue() / 300.0f);
-            rangeSq = (range.getValue() + pingRangeBonus) * (range.getValue() + pingRangeBonus);
-        }
 
         // Search for entities within range
         for (Entity entity : mc.world.getEntities()) {
@@ -759,76 +586,50 @@ public class Aura extends Module {
 
     /**
      * Finds a point on the entity that is visible to the player for precise targeting
+     * with improved aim smoothing and target point selection
+     *
      * @param entity The target entity
      * @return A visible position on the entity, or null if none found
      */
     private Vec3d findVisiblePoint(Entity entity) {
+        // Cache points to avoid flickering between target spots
+        if (primaryTarget == entity && lastTarget == entity && targetPoint != null) {
+            // Still use the same target point for a short time to avoid erratic movement
+            // But verify it's still valid with a raycast
+            if (RaytraceUtil.canSeePosition(entity, targetPoint)) {
+                // Add minor variation to avoid perfect tracking
+                if (random.nextFloat() < 0.05f) {
+                    // Occasionally add very slight jitter to aim point
+                    double jitterX = (random.nextDouble() - 0.5) * 0.03;
+                    double jitterY = (random.nextDouble() - 0.5) * 0.02;
+                    double jitterZ = (random.nextDouble() - 0.5) * 0.03;
+                    return targetPoint.add(jitterX, jitterY, jitterZ);
+                }
+                return targetPoint;
+            }
+        }
+
+        // Check entity's eye position first (more natural aim point)
+        if (entity instanceof LivingEntity) {
+            Vec3d eyePos = entity.getEyePos();
+            if (RaytraceUtil.canSeePosition(entity, eyePos)) {
+                return eyePos;
+            }
+        }
+
+        // Try to find any visible point
         Vec3d visiblePoint = RaytraceUtil.getVisiblePoint(entity);
 
-        // Apply predictive aiming if enabled
-        if (visiblePoint != null && predictiveAim.getValue() && entity.distanceTo(mc.player) > 2.0) {
-            // Calculate velocity of the target entity
-            double velocityX = entity.getX() - entity.prevX;
-            double velocityY = entity.getY() - entity.prevY;
-            double velocityZ = entity.getZ() - entity.prevZ;
-
-            // Enhanced prediction using past positions for better trajectory estimation
-            if (lastTargetPos != null && targetMovementSpeed > 0.05) {
-                Vec3d currentPos = entity.getPos();
-                Vec3d direction = currentPos.subtract(lastTargetPos).normalize();
-
-                // Apply momentum-based prediction
-                float predictionStrength = aimPrediction.getValue();
-
-                // Scale prediction based on ping and target speed
-                float pingFactor = 1.0f;
-                if (pingCompensation.getValue()) {
-                    // Increase prediction for high ping
-                    pingFactor = 1.0f + (pingEstimate.getValue() / 500.0f);
-                }
-
-                float speedMultiplier = (float) Math.min(1.0, targetMovementSpeed * 5);
-                predictionStrength *= pingFactor * speedMultiplier;
-
-                // Create a more accurate prediction for moving targets
-                Vec3d prediction = new Vec3d(
-                        direction.x * predictionStrength * 10.0,
-                        Math.min(Math.abs(direction.y), 0.1) * Math.signum(direction.y) * predictionStrength * 5.0, // Limit vertical prediction
-                        direction.z * predictionStrength * 10.0
-                );
-
-                // Apply prediction to the visible point
-                visiblePoint = visiblePoint.add(prediction);
-            } else {
-                // Fallback to basic prediction
-                Vec3d prediction = new Vec3d(
-                        velocityX * aimPrediction.getValue() * 10.0,
-                        velocityY * aimPrediction.getValue() * 2.5, // Less vertical prediction
-                        velocityZ * aimPrediction.getValue() * 10.0
-                );
-
-                // Apply prediction to the visible point
-                visiblePoint = visiblePoint.add(prediction);
-            }
-
-            // Make sure the prediction still aims at the entity's hitbox
-            Box expandedBox = entity.getBoundingBox().expand(0.4); // Slightly expand hitbox for prediction tolerance
-            if (!expandedBox.contains(visiblePoint)) {
-                // If prediction is outside hitbox, clamp it to the edge of the hitbox
-                visiblePoint = RaytraceUtil.rayTraceEntityBox(mc.player.getEyePos(), visiblePoint, expandedBox);
-
-                // If still null, fall back to the original point
-                if (visiblePoint == null) {
-                    visiblePoint = RaytraceUtil.getVisiblePoint(entity);
-                }
-            }
+        // If no visible point, return null
+        if (visiblePoint == null) {
+            return null;
         }
 
         return visiblePoint;
     }
 
     /**
-     * Handles rotations to the primary target with advanced humanization
+     * Handles rotations to the primary target with improved tracking and more natural movement
      */
     private void handleRotations() {
         if (primaryTarget == null || targetPoint == null) return;
@@ -836,41 +637,139 @@ public class Aura extends Module {
         // Calculate rotation speed based on target metrics
         float speedMultiplier = rotationSpeed.getValue();
 
-        // Adjust speed based on target movement and distance
-        if (targetMovementSpeed > 0.1) {
-            // Faster rotations for moving targets
-            speedMultiplier = Math.min(1.0f, speedMultiplier * (1.0f + (float)targetMovementSpeed * 2.0f));
-        }
-
-        if (targetDistance < 3.0f) {
-            // Faster rotations at close range
-            speedMultiplier = Math.min(1.0f, speedMultiplier * 1.3f);
-        }
-
-        // High ping adjustments
-        if (pingCompensation.getValue()) {
-            // For high ping, we need faster rotations to compensate for delay
-            float pingFactor = 1.0f + (pingEstimate.getValue() / 500.0f);
-            speedMultiplier = Math.min(1.0f, speedMultiplier * pingFactor);
-        }
-
-        // Add slight randomization to rotation speed to avoid patterns
-        speedMultiplier *= (0.95f + random.nextFloat() * 0.1f);
-
         // Calculate the rotations to the target point
         float[] rotations = RotationHandler.calculateLookAt(targetPoint);
 
-        // Add minor jitter to rotations for more human-like movements
-        float jitterAmount = 0.3f;
-        if (speedMultiplier > 0.7f) {
-            // More jitter for faster rotations
-            jitterAmount = 0.5f;
+        // Create human-like rotation patterns
+        // Slower initial movement, faster middle portion, then slower final approach
+        if (mc.player != null) {
+            float currentYaw = mc.player.getYaw();
+            float currentPitch = mc.player.getPitch();
+
+            // Calculate angle differences
+            float yawDiff = Math.abs(MathHelper.wrapDegrees(rotations[0] - currentYaw));
+            float pitchDiff = Math.abs(MathHelper.wrapDegrees(rotations[1] - currentPitch));
+            float totalDiff = yawDiff + pitchDiff;
+
+            // Adjust speed based on how far we need to rotate
+            // Slower for small adjustments, faster for big movements
+            if (totalDiff < 10) {
+                // For fine adjustments, move slower to avoid jitter
+                speedMultiplier *= 0.7f;
+            } else if (totalDiff > 60) {
+                // For large movements, start somewhat faster
+                speedMultiplier *= 1.1f;
+            }
+
+            // Adjust for player's own manual aiming
+            // If player is actively moving their mouse, temporarily blend with their movement
+            if (playerMovedMouse && System.currentTimeMillis() - lastMouseMovedTime < 300) {
+                // Blend rotations for a more natural feel when player is also moving mouse
+                // This creates the impression that the player is helping with the aim
+                speedMultiplier *= 0.85f;
+            }
+
+            // Special case: preAiming to a new target
+            // When we first start tracking a new target, use a more dynamic rotation pattern
+            if (preAimTarget == primaryTarget) {
+                long timeOnTarget = System.currentTimeMillis() - preAimStartTime;
+
+                if (timeOnTarget < 500) {
+                    // Initial acquisition phase - more "searching" behavior
+                    // This mimics a player first finding the target
+                    // First quickly get close, then slow down for precision
+                    if (timeOnTarget < 200 && totalDiff > 20) {
+                        // Quick initial movement toward target
+                        speedMultiplier *= 1.2f;
+                    } else {
+                        // Then slow down as we get closer
+                        speedMultiplier *= 0.85f;
+
+                        // Slightly overshoot and correct (very human-like)
+                        if (random.nextFloat() < 0.3f && timeOnTarget < 300 && totalDiff < 15) {
+                            float overshootAmount = 1.0f + (totalDiff / 30.0f);
+                            rotations[0] += MathHelper.wrapDegrees(rotations[0] - currentYaw) * 0.1f * overshootAmount;
+                            rotations[1] += (rotations[1] - currentPitch) * 0.1f * overshootAmount;
+                        }
+                    }
+                }
+            }
         }
 
-        // Only add jitter randomly to break patterns
-        if (random.nextFloat() < 0.7f) {
+        // Adjust speed based on target movement state
+        if (targetMovementSpeed > 0.12) {
+            // Slightly increased rotation speed for moving targets
+            speedMultiplier = Math.min(0.65f, speedMultiplier * (1.0f + (float)targetMovementSpeed * 1.2f));
+        } else if (targetMovementSpeed < 0.01) {
+            // Slightly slower for stationary targets - looks more natural
+            speedMultiplier *= 0.9f;
+        }
+
+        // Close range targets need slightly faster tracking
+        if (targetDistance < 2.5f) {
+            speedMultiplier = Math.min(0.65f, speedMultiplier * 1.1f);
+        } else if (targetDistance > 4.0f) {
+            // Longer distances can have slightly slower rotations
+            speedMultiplier *= 0.9f;
+        }
+
+        // Add subtle randomization to rotation speed to avoid patterns
+        // Using a bell curve distribution for more natural variation
+        float randomFactor = 0;
+        for (int i = 0; i < 3; i++) {
+            randomFactor += (random.nextFloat() - 0.5f) * 0.1f;
+        }
+        speedMultiplier *= (1.0f + randomFactor);
+
+        // Ensure speed stays within reasonable bounds
+        speedMultiplier = MathHelper.clamp(speedMultiplier, 0.3f, 0.65f);
+
+        // Calculate a slight lead for pre-aim (looking slightly ahead of where target is going)
+        if (targetMovementSpeed > 0.05 && mc.player != null) {
+            // Calculate movement direction vector
+            double moveX = primaryTarget.getX() - primaryTarget.prevX;
+            double moveZ = primaryTarget.getZ() - primaryTarget.prevZ;
+
+            // Normalize and scale by a small amount for "leading" the target
+            double moveLength = Math.sqrt(moveX * moveX + moveZ * moveZ);
+            if (moveLength > 0) {
+                double leadFactor = 0.5 + (random.nextDouble() * 0.5); // Random lead amount
+
+                // Scale lead by distance (more lead at medium distances)
+                double distanceFactor = 1.0;
+                if (targetDistance < 3.0) {
+                    distanceFactor = targetDistance / 3.0;
+                } else if (targetDistance > 5.0) {
+                    distanceFactor = 1.0 - ((targetDistance - 5.0) / 5.0);
+                    distanceFactor = Math.max(0.3, distanceFactor);
+                }
+
+                // Create a lead point that's slightly ahead of the target's movement
+                leadFactor *= distanceFactor;
+                leadFactor *= random.nextDouble() < 0.3 ? 1.5 : 1.0; // Occasionally lead more
+
+                Vec3d leadPoint = targetPoint.add(
+                        moveX * leadFactor,
+                        0, // Don't lead vertically
+                        moveZ * leadFactor
+                );
+
+                // Calculate rotations to the lead point
+                float[] leadRotations = RotationHandler.calculateLookAt(leadPoint);
+
+                // Blend between direct and lead rotations
+                float blendFactor = 0.7f; // How much to lead vs direct aim
+                rotations[0] = rotations[0] * (1 - blendFactor) + leadRotations[0] * blendFactor;
+                rotations[1] = rotations[1] * (1 - blendFactor) + leadRotations[1] * blendFactor;
+            }
+        }
+
+        // Add occasional minor humanization to rotations
+        // Less predictable than applying every time
+        if (random.nextFloat() < 0.4f) {
+            float jitterAmount = 0.2f + (random.nextFloat() * 0.15f); // 0.2 to 0.35 degrees
             rotations[0] += (random.nextFloat() - 0.5f) * jitterAmount;
-            rotations[1] += (random.nextFloat() - 0.5f) * jitterAmount * 0.5f; // Less jitter for pitch
+            rotations[1] += (random.nextFloat() - 0.5f) * jitterAmount * 0.7f; // Less jitter for pitch
         }
 
         // Determine rotation mode parameters
@@ -909,31 +808,31 @@ public class Aura extends Module {
                     rotations[0],
                     rotations[1],
                     ROTATION_PRIORITY,
-                    50, // Shorter duration for faster rotation updates
+                    45, // Slightly faster updates for smoother tracking
                     true, // silent
                     true, // bodyOnly
                     state -> rotating = true
             );
         } else {
-            // Apply faster rotations for moving targets or close range
-            if (targetMovementSpeed > 0.15 || targetDistance < 2.5f) {
-                // Direct rotation for fast-moving or close targets
+            // Occasionally use direct rotation for quick movements
+            // This creates more varied rotation patterns that look more human
+            if (random.nextFloat() < 0.2f && targetMovementSpeed > 0.15f) {
                 RotationHandler.requestRotation(
                         rotations[0],
                         rotations[1],
                         ROTATION_PRIORITY,
-                        40, // Very short duration for rapid updates
+                        40, // Faster response for sudden movements
                         silent,
                         false,
                         state -> rotating = true
                 );
             } else {
-                // Use smoother rotation with look-at for normal cases
+                // Use smoother rotation with look-at for most cases
                 RotationHandler.requestSmoothLookAt(
                         targetPoint,
-                        speedMultiplier * 2.0f, // Increase speed multiplier
+                        speedMultiplier,
                         ROTATION_PRIORITY,
-                        50, // Shorter duration for faster rotation updates
+                        45, // Balanced update rate that still tracks well
                         silent,
                         state -> rotating = true
                 );
@@ -942,175 +841,31 @@ public class Aura extends Module {
     }
 
     /**
-     * Attacks the target entity with optimized packet timing
+     * Attacks the target entity with a single packet
      */
     private void attack(Entity target) {
         if (mc.player == null || mc.interactionManager == null) return;
 
         // Make sure we're still in range
         if (mc.player.distanceTo(target) <= range.getValue()) {
-            long currentTime = System.currentTimeMillis();
+            // Auto-block handling
+            boolean wasBlocking = mc.options.useKey.isPressed();
+            if (autoBlock.getValue() && wasBlocking) {
+                // Release block before attacking
+                mc.options.useKey.setPressed(false);
+            }
 
-            // For high ping, we might want to be more aggressive with packets
-            long minInterval = pingCompensation.getValue() ?
-                    Math.max(5, MIN_PACKET_INTERVAL - (pingEstimate.getValue() / 50)) :
-                    MIN_PACKET_INTERVAL;
+            // Attack the entity
+            mc.interactionManager.attackEntity(mc.player, target);
+            mc.player.swingHand(Hand.MAIN_HAND);
 
-            // Ensure we don't send packets too frequently (avoid packet spam detection)
-            if (currentTime - lastPacketSentTime >= minInterval) {
-                mc.interactionManager.attackEntity(mc.player, target);
-                mc.player.swingHand(Hand.MAIN_HAND);
-                lastPacketSentTime = currentTime;
-                lastAttackPacketTime = currentTime;
+            // Resume blocking if needed
+            if (autoBlock.getValue() && wasBlocking) {
+                mc.options.useKey.setPressed(true);
+            } else if (autoBlock.getValue()) {
+                // Start blocking if auto-block is enabled
+                mc.options.useKey.setPressed(true);
             }
         }
-    }
-
-    /**
-     * Resets the combo counter
-     */
-    private void resetCombo() {
-        comboHits = 0;
-        comboStartTime = 0;
-    }
-
-    /**
-     * Attempts to block with a shield after attacking
-     */
-    private void tryBlock() {
-        // Get mainhand and offhand items
-        boolean hasShield = mc.player.getOffHandStack().isOf(net.minecraft.item.Items.SHIELD) ||
-                mc.player.getMainHandStack().isOf(net.minecraft.item.Items.SHIELD);
-
-        if (hasShield) {
-            // Use key binding to block with shield
-            mc.options.useKey.setPressed(true);
-
-            // Schedule releasing the key after a short delay (150ms)
-            new Thread(() -> {
-                try {
-                    Thread.sleep(150);
-                    mc.options.useKey.setPressed(false);
-                } catch (InterruptedException e) {
-                    // Ignore interruption
-                }
-            }).start();
-        }
-    }
-
-    /**
-     * Checks if we should perform a critical hit
-     */
-    private boolean shouldPerformCritical() {
-        // Check if player can perform a critical hit
-        if (mc.player == null) return false;
-
-        // Don't critical when already in the process
-        if (isCriticaling) return false;
-
-        // Basic conditions for critical hits
-        boolean canCritical = mc.player.isOnGround() &&
-                !mc.player.isInLava() &&
-                !mc.player.isTouchingWater() &&
-                !mc.player.hasStatusEffect(net.minecraft.entity.effect.StatusEffects.BLINDNESS) &&
-                !mc.player.hasVehicle();
-
-        // Only critical sometimes to avoid patterns (70% chance)
-        return canCritical && random.nextFloat() < 0.7f;
-    }
-
-    /**
-     * Starts a critical hit sequence
-     */
-    private void startCriticalAttack(Entity target) {
-        if (!isCriticaling) {
-            isCriticaling = true;
-            criticalTicks = 0;
-            // Store target for the critical sequence
-            lastTarget = target;
-        }
-    }
-
-    /**
-     * Handles the critical hit process over multiple ticks
-     */
-    private void handleCriticalProcess() {
-        if (!isCriticaling || mc.player == null || lastTarget == null) {
-            isCriticaling = false;
-            return;
-        }
-
-        criticalTicks++;
-
-        // For high ping, we adjust the critical sequence timing
-        int jumpTick = pingCompensation.getValue() ? 1 : 2;
-        int attackTick = pingCompensation.getValue() ? 2 : 3;
-
-        // Execute critical packet sequence
-        if (criticalTicks == jumpTick) {
-            // First tick: Apply the jump effect
-            if (!pingCompensation.getValue()) {
-                // For normal ping: Send position packets
-                double x = mc.player.getX();
-                double y = mc.player.getY();
-                double z = mc.player.getZ();
-
-                // Send subtle position changes that trigger critical hit
-                mc.player.networkHandler.sendPacket(
-                        new PlayerMoveC2SPacket.PositionAndOnGround(x, y + 0.0625, z, true, false)
-                );
-                mc.player.networkHandler.sendPacket(
-                        new PlayerMoveC2SPacket.PositionAndOnGround(x, y, z, false, false)
-                );
-            } else {
-                // For high ping: Send optimized critical hit packets
-                double x = mc.player.getX();
-                double y = mc.player.getY();
-                double z = mc.player.getZ();
-
-                // Send a sequence of position packets that reliably trigger critical hits
-                mc.player.networkHandler.sendPacket(
-                        new PlayerMoveC2SPacket.PositionAndOnGround(x, y + 0.05, z, false, false)
-                );
-                mc.player.networkHandler.sendPacket(
-                        new PlayerMoveC2SPacket.PositionAndOnGround(x, y + 0.0, z, false, false)
-                );
-                mc.player.networkHandler.sendPacket(
-                        new PlayerMoveC2SPacket.PositionAndOnGround(x, y + 0.012, z, false, false)
-                );
-                mc.player.networkHandler.sendPacket(
-                        new PlayerMoveC2SPacket.PositionAndOnGround(x, y + 0.0, z, true, false)
-                );
-            }
-        } else if (criticalTicks == attackTick) {
-            // Attack tick: Execute the attack
-            requestAttack(lastTarget);
-            lastAttackTime = System.currentTimeMillis();
-            comboHits++;
-            isCriticaling = false;
-
-            // Handle auto-blocking if enabled
-            if (autoBlock.getValue()) {
-                tryBlock();
-            }
-        }
-    }
-
-    /**
-     * Checks if the target is in a vulnerable state for increased damage
-     */
-    private boolean isTargetVulnerable(Entity target) {
-        if (!(target instanceof LivingEntity livingTarget)) return false;
-
-        // Check if target is in vulnerable state
-        boolean isJumping = !livingTarget.isOnGround() && livingTarget.getVelocity().y > 0;
-        boolean isSlowed = livingTarget.hasStatusEffect(net.minecraft.entity.effect.StatusEffects.SLOWNESS);
-        boolean isLowHealth = livingTarget instanceof PlayerEntity &&
-                ((PlayerEntity)livingTarget).getHealth() < 6.0f;
-        boolean isRegenerating = livingTarget.hasStatusEffect(net.minecraft.entity.effect.StatusEffects.REGENERATION);
-        boolean isEating = livingTarget instanceof PlayerEntity &&
-                ((PlayerEntity)livingTarget).isUsingItem();
-
-        return isJumping || isSlowed || isLowHealth || (isRegenerating && isLowHealth) || isEating;
     }
 }

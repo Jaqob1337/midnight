@@ -17,6 +17,7 @@
 		"StatusEffectHudMixin",
 		"SystemMessageMixin",
 		"TitleScreenMixin",
+		"NoSlowMixin",
 		"ToastMixin",
 		"VelocityMixin"
 	],

@@ -20,7 +20,7 @@ public class Watermark {
     private static final int SHADOW_COLOR = (120 << 24) | (0 << 16) | (0 << 8) | 0;
 
     // Desired font size for the watermark.
-    private static final float FONT_SIZE = 16f;
+    private static final float FONT_SIZE = 14f;
 
     public static void render(MatrixStack matrices) {
         CustomFontRenderer fontRenderer = CustomFontRenderer.getInstanceForSize(FONT_SIZE);

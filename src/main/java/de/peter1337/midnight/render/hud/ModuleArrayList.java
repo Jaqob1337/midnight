@@ -16,7 +16,7 @@ public class ModuleArrayList {
     private static final int RIGHT_MARGIN = 8;
     private static final int TOP_MARGIN = 2;
     // Desired font size for the module array list.
-    private static final float FONT_SIZE = 11f;
+    private static final float FONT_SIZE = 10f;
 
     public static void render(MatrixStack matrices) {
         MinecraftClient mc = MinecraftClient.getInstance();
