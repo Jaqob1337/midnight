@@ -15,17 +15,13 @@ import net.minecraft.util.Hand;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.item.SwordItem;
-import net.minecraft.item.AxeItem;
-import net.minecraft.item.TridentItem;
-import net.minecraft.enchantment.EnchantmentHelper;
+import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
-import java.util.stream.Collectors;
 
 public class Aura extends Module {
     private final MinecraftClient mc = MinecraftClient.getInstance();
@@ -118,6 +114,40 @@ public class Aura extends Module {
             new Setting<>("FOVCheck", 180f, 30f, 360f, "Field of view angle for target visibility")
     );
 
+    // High ping specific settings
+    private final Setting<Boolean> pingCompensation = register(
+            new Setting<>("PingCompensation", Boolean.TRUE, "Adjust timing for high ping")
+    );
+
+    private final Setting<Integer> pingEstimate = register(
+            new Setting<>("PingEstimate", 150, 0, 1000, "Your estimated ping in milliseconds")
+                    .dependsOn(pingCompensation)
+    );
+
+    private final Setting<Boolean> predictPosition = register(
+            new Setting<>("PredictPosition", Boolean.TRUE, "Predict where target will be based on ping")
+                    .dependsOn(pingCompensation)
+    );
+
+    private final Setting<Boolean> preAttack = register(
+            new Setting<>("PreAttack", Boolean.TRUE, "Start attack sequence earlier based on ping")
+                    .dependsOn(pingCompensation)
+    );
+
+    private final Setting<Boolean> extraPackets = register(
+            new Setting<>("ExtraPackets", Boolean.TRUE, "Send additional attack packets for high ping")
+                    .dependsOn(pingCompensation)
+    );
+
+    private final Setting<Integer> packetMultiplier = register(
+            new Setting<>("PacketMultiplier", 2, 1, 5, "How many extra packets to send")
+                    .dependsOn(extraPackets)
+    );
+
+    private final Setting<Integer> targetHistorySize = register(
+            new Setting<>("TargetHistorySize", 3, 1, 10, "How many past targets to remember")
+    );
+
     // Properties to track state
     private long lastAttackTime = 0;
     private long lastPacketSentTime = 0;
@@ -131,6 +161,40 @@ public class Aura extends Module {
     private int criticalTicks = 0;
     private boolean isCriticaling = false;
     private Vec3d lastTargetPos = null;
+
+    // High ping specific variables
+    private List<TargetHistory> targetHistory = new ArrayList<>();
+    private long lastAttackPacketTime = 0;
+    private boolean isAttackConfirmed = false;
+    private int attackTimeoutCounter = 0;
+    private static final int MAX_ATTACK_TIMEOUT = 20; // 1 second timeout (20 ticks)
+    private List<TargetRequest> pendingAttacks = new ArrayList<>();
+
+    // Store entity health to detect successful hits
+    private class TargetHistory {
+        Entity entity;
+        float lastHealth;
+        long timestamp;
+
+        public TargetHistory(Entity entity, float health) {
+            this.entity = entity;
+            this.lastHealth = health;
+            this.timestamp = System.currentTimeMillis();
+        }
+    }
+
+    // For high-ping, track attack requests
+    private class TargetRequest {
+        Entity entity;
+        long timestamp;
+        boolean processed;
+
+        public TargetRequest(Entity entity) {
+            this.entity = entity;
+            this.timestamp = System.currentTimeMillis();
+            this.processed = false;
+        }
+    }
 
     public Aura() {
         super("Aura", "Automatically attacks nearby entities", Category.COMBAT, "r");
@@ -150,6 +214,10 @@ public class Aura extends Module {
         criticalTicks = 0;
         isCriticaling = false;
         lastTargetPos = null;
+        targetHistory.clear();
+        isAttackConfirmed = false;
+        attackTimeoutCounter = 0;
+        pendingAttacks.clear();
 
         if (mc.player != null) {
             originalYaw = mc.player.getYaw();
@@ -170,6 +238,10 @@ public class Aura extends Module {
         criticalTicks = 0;
         isCriticaling = false;
         lastTargetPos = null;
+        targetHistory.clear();
+        isAttackConfirmed = false;
+        attackTimeoutCounter = 0;
+        pendingAttacks.clear();
 
         // Cancel rotations when disabling
         RotationHandler.cancelRotationByPriority(ROTATION_PRIORITY);
@@ -212,6 +284,102 @@ public class Aura extends Module {
 
         // Process attack logic in POST tick if not already done in PRE
         processAttack();
+
+        // Check if we've successfully hit a target
+        checkHitConfirmation();
+
+        // Process pending attacks (for high-ping compensation)
+        processPendingAttacks();
+
+        // Handle attack timeout (for high ping situations)
+        if (!isAttackConfirmed && primaryTarget != null && attackTimeoutCounter > 0) {
+            attackTimeoutCounter--;
+
+            // If we've waited too long for hit confirmation, try again
+            if (attackTimeoutCounter <= 0 && pingCompensation.getValue()) {
+                // Re-attempt attack if no confirmation came through
+                if (primaryTarget instanceof LivingEntity) {
+                    if (preAttack.getValue()) {
+                        requestAttack(primaryTarget);
+                        lastAttackTime = System.currentTimeMillis();
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Process pending attack requests
+     */
+    private void processPendingAttacks() {
+        if (!pingCompensation.getValue() || !extraPackets.getValue()) {
+            pendingAttacks.clear();
+            return;
+        }
+
+        long currentTime = System.currentTimeMillis();
+
+        // Remove old requests
+        pendingAttacks.removeIf(request -> currentTime - request.timestamp > 2000);
+
+        // Process unprocessed requests
+        for (TargetRequest request : pendingAttacks) {
+            if (!request.processed && request.entity != null && !request.entity.isRemoved() &&
+                    request.entity instanceof LivingEntity && ((LivingEntity) request.entity).getHealth() > 0) {
+
+                // Send packet directly
+                directAttack(request.entity);
+                request.processed = true;
+            }
+        }
+    }
+
+    /**
+     * Check if our attacks actually landed by monitoring target health
+     */
+    private void checkHitConfirmation() {
+        // Remove old entries from history
+        long currentTime = System.currentTimeMillis();
+        targetHistory.removeIf(entry -> currentTime - entry.timestamp > 2000); // 2 second timeout
+
+        // Check for hit confirmation
+        if (primaryTarget instanceof LivingEntity livingTarget) {
+            float currentHealth = livingTarget.getHealth();
+
+            // Check if this target is in our history
+            for (TargetHistory entry : targetHistory) {
+                if (entry.entity == primaryTarget && entry.lastHealth > currentHealth) {
+                    // We've confirmed a hit!
+                    isAttackConfirmed = true;
+                    attackTimeoutCounter = 0;
+
+                    // Update the health in history
+                    entry.lastHealth = currentHealth;
+                    entry.timestamp = currentTime;
+                    return;
+                }
+            }
+
+            // Add target to history if not already there
+            boolean found = false;
+            for (TargetHistory entry : targetHistory) {
+                if (entry.entity == primaryTarget) {
+                    entry.lastHealth = currentHealth;
+                    entry.timestamp = currentTime;
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                targetHistory.add(new TargetHistory(primaryTarget, currentHealth));
+
+                // Limit history size
+                while (targetHistory.size() > targetHistorySize.getValue()) {
+                    targetHistory.remove(0);
+                }
+            }
+        }
     }
 
     /**
@@ -220,7 +388,14 @@ public class Aura extends Module {
     private void processAttack() {
         // Calculate attack delay based on CPS
         long currentTime = System.currentTimeMillis();
-        float baseDelay = 600.0f / cps.getValue(); // Convert CPS to milliseconds
+        float baseDelay = 1000.0f / cps.getValue(); // Convert CPS to milliseconds
+
+        // Apply ping compensation to attack timing
+        if (pingCompensation.getValue()) {
+            // If ping is high, we need to reduce delay to compensate
+            float pingFactor = 1.0f - MathHelper.clamp(pingEstimate.getValue() / 2000.0f, 0.0f, 0.5f);
+            baseDelay *= pingFactor;
+        }
 
         // Add smart randomization to avoid patterns (always randomize slightly)
         long attackDelay;
@@ -254,8 +429,13 @@ public class Aura extends Module {
             float cooldownProgress = mc.player.getAttackCooldownProgress(0.0f);
             boolean cooldownReady = !smartAttack.getValue() || cooldownProgress >= 0.9f;
 
-            // Find a visible point on the target to aim at
-            targetPoint = findVisiblePoint(primaryTarget);
+            // Apply ping compensation for target position
+            if (pingCompensation.getValue() && predictPosition.getValue()) {
+                predictTargetPosition();
+            } else {
+                // Find a visible point on the target to aim at
+                targetPoint = findVisiblePoint(primaryTarget);
+            }
 
             // If no visible point and we're not allowed to attack through walls, skip
             if (targetPoint == null && !throughWalls.getValue()) {
@@ -296,6 +476,7 @@ public class Aura extends Module {
                 comboHits = 0;
                 comboStartTime = currentTime;
                 lastTarget = primaryTarget;
+                isAttackConfirmed = false;
             }
 
             // Adjust timing based on target vulnerability
@@ -329,10 +510,15 @@ public class Aura extends Module {
                 }
             }
 
-            // Switch to best weapon before attacking if appropriate
-
             // Attack if rotation is complete, cooldown is ready, and we can attack
             if (canAttack && cooldownReady && RotationHandler.isRotationActive() && canHit && !isCriticaling) {
+                // For high ping, we need to be more careful about when to start attack animations
+                if (pingCompensation.getValue() && preAttack.getValue()) {
+                    // Start attack process earlier for high ping
+                    attackTimeoutCounter = MAX_ATTACK_TIMEOUT;
+                    isAttackConfirmed = false;
+                }
+
                 // Check for critical hit opportunity
                 boolean shouldCritical = shouldPerformCritical();
 
@@ -340,8 +526,8 @@ public class Aura extends Module {
                     // Start critical hit sequence
                     startCriticalAttack(primaryTarget);
                 } else {
-                    // Normal attack
-                    attack(primaryTarget);
+                    // Request the attack (possibly multiple packets for high ping)
+                    requestAttack(primaryTarget);
                     lastAttackTime = currentTime;
                     comboHits++;
 
@@ -362,6 +548,86 @@ public class Aura extends Module {
                 mc.player.setYaw(originalYaw);
                 mc.player.setPitch(originalPitch);
             }
+        }
+    }
+
+    /**
+     * Request an attack on a target, with extra packets for high ping
+     */
+    private void requestAttack(Entity target) {
+        if (target == null || mc.player == null) return;
+
+        // Always perform the normal attack
+        attack(target);
+
+        // For high ping, possibly send additional attack packets
+        if (pingCompensation.getValue() && extraPackets.getValue() && packetMultiplier.getValue() > 1) {
+            // Add to pending attacks for processing in upcoming ticks
+            pendingAttacks.add(new TargetRequest(target));
+
+            // Also send some immediate extra packets
+            for (int i = 1; i < packetMultiplier.getValue(); i++) {
+                if (random.nextFloat() < 0.7f) {  // 70% chance to send each extra packet
+                    directAttack(target);
+                }
+            }
+        }
+    }
+
+    /**
+     * Send attack packet directly without animation
+     */
+    private void directAttack(Entity target) {
+        if (mc.player == null || mc.interactionManager == null || target == null) return;
+
+        // Send the attack packet directly without animation
+        if (System.currentTimeMillis() - lastPacketSentTime >= MIN_PACKET_INTERVAL) {
+            mc.interactionManager.attackEntity(mc.player, target);
+            lastPacketSentTime = System.currentTimeMillis();
+        }
+    }
+
+    /**
+     * Predict where the target will be after ping delay
+     */
+    private void predictTargetPosition() {
+        if (primaryTarget == null || lastTargetPos == null) {
+            targetPoint = findVisiblePoint(primaryTarget);
+            return;
+        }
+
+        // Calculate current velocity vector
+        Vec3d currentPos = primaryTarget.getPos();
+        Vec3d velocity = currentPos.subtract(lastTargetPos);
+
+        // Scale velocity by ping (convert ms to seconds)
+        float pingSeconds = pingEstimate.getValue() / 1000.0f;
+
+        // Predict future position based on current velocity and ping
+        Vec3d predictedPos = currentPos.add(
+                velocity.x * pingSeconds * 15.0,
+                Math.max(-0.5, Math.min(0.5, velocity.y * pingSeconds * 10.0)), // Limit vertical prediction
+                velocity.z * pingSeconds * 15.0
+        );
+
+        // Check if predicted position is reasonable (not too far)
+        double maxPredictDistance = 5.0;
+        if (predictedPos.distanceTo(currentPos) > maxPredictDistance) {
+            // Limit the prediction distance
+            Vec3d direction = predictedPos.subtract(currentPos).normalize();
+            predictedPos = currentPos.add(direction.multiply(maxPredictDistance));
+        }
+
+        // Now try to find a visible point at this predicted position
+        Vec3d visiblePoint = RaytraceUtil.getVisiblePoint(primaryTarget);
+
+        // If we can get a visible point, offset it by our prediction
+        if (visiblePoint != null) {
+            Vec3d offset = predictedPos.subtract(currentPos);
+            targetPoint = visiblePoint.add(offset);
+        } else {
+            // Fallback to direct predicted position
+            targetPoint = predictedPos.add(0, primaryTarget.getHeight() / 2, 0);
         }
     }
 
@@ -403,6 +669,12 @@ public class Aura extends Module {
 
         List<Entity> potentialTargets = new ArrayList<>();
         double rangeSq = range.getValue() * range.getValue();
+
+        // For high ping, increase effective range slightly to compensate for movement delay
+        if (pingCompensation.getValue()) {
+            float pingRangeBonus = Math.min(2.0f, pingEstimate.getValue() / 300.0f);
+            rangeSq = (range.getValue() + pingRangeBonus) * (range.getValue() + pingRangeBonus);
+        }
 
         // Search for entities within range
         for (Entity entity : mc.world.getEntities()) {
@@ -507,8 +779,14 @@ public class Aura extends Module {
 
                 // Apply momentum-based prediction
                 float predictionStrength = aimPrediction.getValue();
+
                 // Scale prediction based on ping and target speed
-                float pingFactor = 1.0f; // Ideally would be adjusted based on ping
+                float pingFactor = 1.0f;
+                if (pingCompensation.getValue()) {
+                    // Increase prediction for high ping
+                    pingFactor = 1.0f + (pingEstimate.getValue() / 500.0f);
+                }
+
                 float speedMultiplier = (float) Math.min(1.0, targetMovementSpeed * 5);
                 predictionStrength *= pingFactor * speedMultiplier;
 
@@ -567,6 +845,13 @@ public class Aura extends Module {
         if (targetDistance < 3.0f) {
             // Faster rotations at close range
             speedMultiplier = Math.min(1.0f, speedMultiplier * 1.3f);
+        }
+
+        // High ping adjustments
+        if (pingCompensation.getValue()) {
+            // For high ping, we need faster rotations to compensate for delay
+            float pingFactor = 1.0f + (pingEstimate.getValue() / 500.0f);
+            speedMultiplier = Math.min(1.0f, speedMultiplier * pingFactor);
         }
 
         // Add slight randomization to rotation speed to avoid patterns
@@ -666,11 +951,17 @@ public class Aura extends Module {
         if (mc.player.distanceTo(target) <= range.getValue()) {
             long currentTime = System.currentTimeMillis();
 
+            // For high ping, we might want to be more aggressive with packets
+            long minInterval = pingCompensation.getValue() ?
+                    Math.max(5, MIN_PACKET_INTERVAL - (pingEstimate.getValue() / 50)) :
+                    MIN_PACKET_INTERVAL;
+
             // Ensure we don't send packets too frequently (avoid packet spam detection)
-            if (currentTime - lastPacketSentTime >= MIN_PACKET_INTERVAL) {
+            if (currentTime - lastPacketSentTime >= minInterval) {
                 mc.interactionManager.attackEntity(mc.player, target);
                 mc.player.swingHand(Hand.MAIN_HAND);
                 lastPacketSentTime = currentTime;
+                lastAttackPacketTime = currentTime;
             }
         }
     }
@@ -751,12 +1042,49 @@ public class Aura extends Module {
 
         criticalTicks++;
 
+        // For high ping, we adjust the critical sequence timing
+        int jumpTick = pingCompensation.getValue() ? 1 : 2;
+        int attackTick = pingCompensation.getValue() ? 2 : 3;
+
         // Execute critical packet sequence
-        if (criticalTicks == 1) {
-            // First tick: Send position packets
-        } else if (criticalTicks == 2) {
-            // Second tick: Execute the attack
-            attack(lastTarget);
+        if (criticalTicks == jumpTick) {
+            // First tick: Apply the jump effect
+            if (!pingCompensation.getValue()) {
+                // For normal ping: Send position packets
+                double x = mc.player.getX();
+                double y = mc.player.getY();
+                double z = mc.player.getZ();
+
+                // Send subtle position changes that trigger critical hit
+                mc.player.networkHandler.sendPacket(
+                        new PlayerMoveC2SPacket.PositionAndOnGround(x, y + 0.0625, z, true, false)
+                );
+                mc.player.networkHandler.sendPacket(
+                        new PlayerMoveC2SPacket.PositionAndOnGround(x, y, z, false, false)
+                );
+            } else {
+                // For high ping: Send optimized critical hit packets
+                double x = mc.player.getX();
+                double y = mc.player.getY();
+                double z = mc.player.getZ();
+
+                // Send a sequence of position packets that reliably trigger critical hits
+                mc.player.networkHandler.sendPacket(
+                        new PlayerMoveC2SPacket.PositionAndOnGround(x, y + 0.05, z, false, false)
+                );
+                mc.player.networkHandler.sendPacket(
+                        new PlayerMoveC2SPacket.PositionAndOnGround(x, y + 0.0, z, false, false)
+                );
+                mc.player.networkHandler.sendPacket(
+                        new PlayerMoveC2SPacket.PositionAndOnGround(x, y + 0.012, z, false, false)
+                );
+                mc.player.networkHandler.sendPacket(
+                        new PlayerMoveC2SPacket.PositionAndOnGround(x, y + 0.0, z, true, false)
+                );
+            }
+        } else if (criticalTicks == attackTick) {
+            // Attack tick: Execute the attack
+            requestAttack(lastTarget);
             lastAttackTime = System.currentTimeMillis();
             comboHits++;
             isCriticaling = false;
@@ -767,8 +1095,6 @@ public class Aura extends Module {
             }
         }
     }
-
-
 
     /**
      * Checks if the target is in a vulnerable state for increased damage
@@ -787,9 +1113,4 @@ public class Aura extends Module {
 
         return isJumping || isSlowed || isLowHealth || (isRegenerating && isLowHealth) || isEating;
     }
-
-    /**
-     * Switches to the optimal weapon for combat if available
-     */
-
-    }
+}

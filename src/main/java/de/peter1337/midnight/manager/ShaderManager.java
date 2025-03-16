@@ -23,6 +23,12 @@ public class ShaderManager {
     private final FloatBuffer matrixBuffer = BufferUtils.createFloatBuffer(16);
     private boolean initialized = false;
 
+    // Track if program is created to avoid recreation
+    private static boolean programCreated = false;
+    private static int staticShaderProgram = 0;
+    private static int staticVertexShader = 0;
+    private static int staticFragmentShader = 0;
+
     // Cache uniform locations
     private int clipBoundsLocation = -1;
     private int clipRadiusLocation = -1;
@@ -37,14 +43,49 @@ public class ShaderManager {
     private int guiScaleLocation = -1;
 
     public void init(int width, int height) {
-        if (initialized) {
-            cleanup();
+        // Clean up previously allocated VBO/VAO resources to avoid leaks
+        if (vao != 0) {
+            GL30.glDeleteVertexArrays(vao);
+            vao = 0;
+        }
+        if (vbo != 0) {
+            GL15.glDeleteBuffers(vbo);
+            vbo = 0;
         }
 
         try {
-            setupShaders();
+            // Only create shaders and program once globally
+            if (!programCreated) {
+                staticVertexShader = createShader(GL20.GL_VERTEX_SHADER, ShaderSources.VERTEX_SHADER_SOURCE);
+                staticFragmentShader = createShader(GL20.GL_FRAGMENT_SHADER, ShaderSources.FRAGMENT_SHADER_SOURCE);
+
+                if (staticVertexShader == 0 || staticFragmentShader == 0) {
+                    throw new RuntimeException("Failed to create shaders");
+                }
+
+                staticShaderProgram = createProgram(staticVertexShader, staticFragmentShader);
+                if (staticShaderProgram == 0) {
+                    throw new RuntimeException("Failed to create shader program");
+                }
+
+                programCreated = true;
+                Midnight.LOGGER.info("Created shader program once globally");
+            }
+
+            // Use the static shaders and program
+            vertexShader = staticVertexShader;
+            fragmentShader = staticFragmentShader;
+            shaderProgram = staticShaderProgram;
+
+            // Always set up buffers fresh
             setupBuffers();
+
+            // Cache uniform locations once
             cacheUniformLocations();
+
+            // Set resolution uniform
+            updateResolution(width, height);
+
             initialized = true;
             Midnight.LOGGER.info("ShaderManager initialized successfully");
         } catch (Exception e) {
@@ -53,8 +94,38 @@ public class ShaderManager {
         }
     }
 
-    private void cacheUniformLocations() {
+    /**
+     * Updates resolution-dependent uniforms
+     */
+    private void updateResolution(int width, int height) {
+        if (shaderProgram == 0) return;
+
+        int previousProgram = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
         GL20.glUseProgram(shaderProgram);
+
+        if (resolutionLocation != -1) {
+            GL20.glUniform2f(resolutionLocation, width, height);
+        }
+
+        // Initialize transform matrix
+        if (transformLocation != -1) {
+            Matrix4f transform = new Matrix4f().identity();
+            transform.get(matrixBuffer);
+            GL20.glUniformMatrix4fv(transformLocation, false, matrixBuffer);
+        }
+
+        // Reset clip bounds
+        if (clipBoundsLocation != -1) {
+            GL20.glUniform4f(clipBoundsLocation, 0, 0, 0, 0);
+        }
+
+        GL20.glUseProgram(previousProgram);
+    }
+
+    private void cacheUniformLocations() {
+        int previousProgram = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
+        GL20.glUseProgram(shaderProgram);
+
         clipBoundsLocation = GL20.glGetUniformLocation(shaderProgram, "clipBounds");
         clipRadiusLocation = GL20.glGetUniformLocation(shaderProgram, "clipRadius");
         transformLocation = GL20.glGetUniformLocation(shaderProgram, "transform");
@@ -66,23 +137,12 @@ public class ShaderManager {
         outlineColorLocation = GL20.glGetUniformLocation(shaderProgram, "outlineColor");
         outlineWidthLocation = GL20.glGetUniformLocation(shaderProgram, "outlineWidth");
         guiScaleLocation = GL20.glGetUniformLocation(shaderProgram, "guiScale");
-        GL20.glUseProgram(0);
-    }
 
-    private void setupShaders() {
-        vertexShader = createShader(GL20.GL_VERTEX_SHADER, ShaderSources.VERTEX_SHADER_SOURCE);
-        fragmentShader = createShader(GL20.GL_FRAGMENT_SHADER, ShaderSources.FRAGMENT_SHADER_SOURCE);
-        if (vertexShader == 0 || fragmentShader == 0) {
-            throw new RuntimeException("Failed to create shaders");
-        }
-
-        shaderProgram = createProgram(vertexShader, fragmentShader);
-        if (shaderProgram == 0) {
-            throw new RuntimeException("Failed to create shader program");
-        }
+        GL20.glUseProgram(previousProgram);
     }
 
     private void setupBuffers() {
+        // Using a full-screen quad with UV coordinates
         float[] vertices = {
                 -1.0f, -1.0f, 0.0f, 0.0f, 0.0f,
                 1.0f, -1.0f, 0.0f, 1.0f, 0.0f,
@@ -100,8 +160,11 @@ public class ShaderManager {
         vertexBuffer.put(vertices).flip();
         GL15.glBufferData(GL15.GL_ARRAY_BUFFER, vertexBuffer, GL15.GL_STATIC_DRAW);
 
+        // Position attribute
         GL20.glVertexAttribPointer(0, 3, GL11.GL_FLOAT, false, 5 * Float.BYTES, 0);
         GL20.glEnableVertexAttribArray(0);
+
+        // Texture coordinate attribute
         GL20.glVertexAttribPointer(1, 2, GL11.GL_FLOAT, false, 5 * Float.BYTES, 3 * Float.BYTES);
         GL20.glEnableVertexAttribArray(1);
 
@@ -139,7 +202,7 @@ public class ShaderManager {
     }
 
     public void setClipBounds(float x, float y, float width, float height, float radius) {
-        if (!initialized) return;
+        if (!initialized || shaderProgram == 0) return;
 
         int previousProgram = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
         GL20.glUseProgram(shaderProgram);
@@ -147,178 +210,176 @@ public class ShaderManager {
         int screenHeight = MinecraftClient.getInstance().getWindow().getScaledHeight();
         float convertedY = screenHeight - y - height;
 
+        // Set clip bounds uniforms if they exist
         if (clipBoundsLocation != -1) {
             GL20.glUniform4f(clipBoundsLocation, x, convertedY, width, height);
         }
         if (clipRadiusLocation != -1) {
             GL20.glUniform1f(clipRadiusLocation, radius);
         }
+
         GL20.glUseProgram(previousProgram);
     }
 
     public void resetClipBounds() {
-        if (!initialized) return;
+        if (!initialized || shaderProgram == 0) return;
 
         int previousProgram = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
         GL20.glUseProgram(shaderProgram);
+
         if (clipBoundsLocation != -1) {
             GL20.glUniform4f(clipBoundsLocation, 0, 0, 0, 0);
         }
         if (clipRadiusLocation != -1) {
             GL20.glUniform1f(clipRadiusLocation, 0);
         }
+
         GL20.glUseProgram(previousProgram);
     }
 
     public void drawShape(float x, float y, float width, float height, float radius, float smoothing,
                           Color fillColor, Color outlineColor, float outlineWidth) {
-        if (!initialized) return;
+        if (!initialized || shaderProgram == 0 || vao == 0) return;
 
-        // Save complete GL state
+        // Skip if shape has zero dimensions
+        if (width <= 0 || height <= 0) return;
+
+        // Save current GL state
         int previousProgram = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
-        int previousActiveTexture = GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
-        int[] previousTextures = new int[32];  // Save all texture bindings
-        for (int i = 0; i < 32; i++) {
-            GL13.glActiveTexture(GL13.GL_TEXTURE0 + i);
-            previousTextures[i] = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
-        }
         int previousVAO = GL30.glGetInteger(GL30.GL_VERTEX_ARRAY_BINDING);
-        int previousArrayBuffer = GL11.glGetInteger(GL15.GL_ARRAY_BUFFER_BINDING);
-        boolean previousBlend = GL11.glGetBoolean(GL11.GL_BLEND);
-        int previousBlendSrcRGB = GL11.glGetInteger(GL14.GL_BLEND_SRC_RGB);
-        int previousBlendDstRGB = GL11.glGetInteger(GL14.GL_BLEND_DST_RGB);
-        int previousBlendSrcAlpha = GL11.glGetInteger(GL14.GL_BLEND_SRC_ALPHA);
-        int previousBlendDstAlpha = GL11.glGetInteger(GL14.GL_BLEND_DST_ALPHA);
-        boolean previousDepthTest = GL11.glGetBoolean(GL11.GL_DEPTH_TEST);
-        boolean previousCullFace = GL11.glGetBoolean(GL11.GL_CULL_FACE);
-        int[] previousViewport = new int[4];
-        GL11.glGetIntegerv(GL11.GL_VIEWPORT, previousViewport);
+        boolean previousBlend = GL11.glIsEnabled(GL11.GL_BLEND);
+        int previousBlendSrc = GL11.glGetInteger(GL11.GL_BLEND_SRC);
+        int previousBlendDst = GL11.glGetInteger(GL11.GL_BLEND_DST);
 
         try {
-            // Reset texture state
-            GL13.glActiveTexture(GL13.GL_TEXTURE0);
-            GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
-
-            // Set our required state
+            // Set up rendering state
             GL11.glEnable(GL11.GL_BLEND);
-            GL14.glBlendFuncSeparate(
-                    GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA,
-                    GL11.GL_ONE, GL11.GL_ONE_MINUS_SRC_ALPHA
-            );
-            GL11.glDisable(GL11.GL_DEPTH_TEST);
-            GL11.glDisable(GL11.GL_CULL_FACE);
+            GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
 
-            // Use our shader
+            // Use our shader and VAO
             GL20.glUseProgram(shaderProgram);
             GL30.glBindVertexArray(vao);
-            GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, vbo);
 
+            // Get current screen dimensions
             float guiScale = (float) MinecraftClient.getInstance().options.getGuiScale().getValue();
             int screenHeight = MinecraftClient.getInstance().getWindow().getScaledHeight();
             float convertedY = screenHeight - y - height;
 
-            // Adjust smoothing based on size and radius
-            float adjustedSmoothing = smoothing;
-            if (width > 300 || height > 150) {
-                // Increase smoothing for larger shapes to improve anti-aliasing
-                adjustedSmoothing = Math.max(smoothing, 1.5f);
-            }
+            // Calculate optimal smoothing for this shape
+            float optimalSmoothing = calculateOptimalSmoothing(width, height, radius, smoothing);
 
-            // For shapes with large radius, increase smoothing further
-            if (radius > 10) {
-                adjustedSmoothing = Math.max(adjustedSmoothing, radius / 8);
-            }
-
-            // Set uniforms using cached locations
+            // Set uniforms
             if (resolutionLocation != -1) GL20.glUniform2f(resolutionLocation, width, height);
             if (rectLocation != -1) GL20.glUniform4f(rectLocation, x, convertedY, width, height);
             if (radiusLocation != -1) GL20.glUniform1f(radiusLocation, radius);
-            if (smoothingLocation != -1) GL20.glUniform1f(smoothingLocation, adjustedSmoothing);
+            if (smoothingLocation != -1) GL20.glUniform1f(smoothingLocation, optimalSmoothing);
+            if (guiScaleLocation != -1) GL20.glUniform1f(guiScaleLocation, guiScale);
 
+            // Set fill color
             if (colorLocation != -1) {
-                // Ensure alpha is never exactly 100% for better anti-aliasing
-                float alpha = fillColor.getAlpha() / 255f;
-                if (alpha > 0.99f) alpha = 0.99f;
-
                 GL20.glUniform4f(colorLocation,
                         fillColor.getRed() / 255f,
                         fillColor.getGreen() / 255f,
                         fillColor.getBlue() / 255f,
-                        alpha
+                        fillColor.getAlpha() / 255f
                 );
             }
 
+            // Set outline if needed
             if (outlineColor != null && outlineColorLocation != -1) {
-                // Also apply alpha adjustment to outline
-                float outlineAlpha = outlineColor.getAlpha() / 255f;
-                if (outlineAlpha > 0.99f) outlineAlpha = 0.99f;
-
                 GL20.glUniform4f(outlineColorLocation,
                         outlineColor.getRed() / 255f,
                         outlineColor.getGreen() / 255f,
                         outlineColor.getBlue() / 255f,
-                        outlineAlpha
+                        outlineColor.getAlpha() / 255f
                 );
-                if (outlineWidthLocation != -1) GL20.glUniform1f(outlineWidthLocation, outlineWidth);
+
+                if (outlineWidthLocation != -1) {
+                    GL20.glUniform1f(outlineWidthLocation, outlineWidth);
+                }
             } else if (outlineColorLocation != -1) {
+                // No outline - set alpha to 0
                 GL20.glUniform4f(outlineColorLocation, 0f, 0f, 0f, 0f);
-                if (outlineWidthLocation != -1) GL20.glUniform1f(outlineWidthLocation, 0f);
+                if (outlineWidthLocation != -1) {
+                    GL20.glUniform1f(outlineWidthLocation, 0f);
+                }
             }
 
-            if (guiScaleLocation != -1) GL20.glUniform1f(guiScaleLocation, guiScale);
-            if (transformLocation != -1) {
-                Matrix4f transform = new Matrix4f().identity();
-                transform.get(matrixBuffer);
-                GL20.glUniformMatrix4fv(transformLocation, false, matrixBuffer);
-            }
-
-            // Draw
+            // Draw the quad
             GL11.glDrawArrays(GL11.GL_TRIANGLE_FAN, 0, 4);
 
+        } catch (Exception e) {
+            Midnight.LOGGER.error("Error in drawShape: " + e.getMessage());
         } finally {
-            // Restore complete GL state in reverse order
-            GL11.glViewport(previousViewport[0], previousViewport[1], previousViewport[2], previousViewport[3]);
-
-            if (previousCullFace) GL11.glEnable(GL11.GL_CULL_FACE);
-            else GL11.glDisable(GL11.GL_CULL_FACE);
-
-            if (previousDepthTest) GL11.glEnable(GL11.GL_DEPTH_TEST);
-            else GL11.glDisable(GL11.GL_DEPTH_TEST);
-
-            if (previousBlend) GL11.glEnable(GL11.GL_BLEND);
-            else GL11.glDisable(GL11.GL_BLEND);
-
-            GL14.glBlendFuncSeparate(
-                    previousBlendSrcRGB, previousBlendDstRGB,
-                    previousBlendSrcAlpha, previousBlendDstAlpha
-            );
-
-            GL15.glBindBuffer(GL15.GL_ARRAY_BUFFER, previousArrayBuffer);
+            // Restore GL state
+            GL20.glUseProgram(previousProgram);
             GL30.glBindVertexArray(previousVAO);
 
-            // Restore all texture bindings
-            for (int i = 31; i >= 0; i--) {
-                GL13.glActiveTexture(GL13.GL_TEXTURE0 + i);
-                GL11.glBindTexture(GL11.GL_TEXTURE_2D, previousTextures[i]);
+            if (!previousBlend) {
+                GL11.glDisable(GL11.GL_BLEND);
+            } else {
+                GL11.glBlendFunc(previousBlendSrc, previousBlendDst);
             }
-            GL13.glActiveTexture(previousActiveTexture);
-
-            GL20.glUseProgram(previousProgram);
         }
     }
 
-    public void cleanup() {
-        if (vao != 0) GL30.glDeleteVertexArrays(vao);
-        if (vbo != 0) GL15.glDeleteBuffers(vbo);
-        if (vertexShader != 0) GL20.glDeleteShader(vertexShader);
-        if (fragmentShader != 0) GL20.glDeleteShader(fragmentShader);
-        if (shaderProgram != 0) GL20.glDeleteProgram(shaderProgram);
+    /**
+     * Calculate optimal smoothing for a shape based on its properties
+     */
+    private float calculateOptimalSmoothing(float width, float height, float radius, float baseSmoothing) {
+        // For small UI elements, use fixed value for consistent appearance
+        if (width < 50 || height < 20) {
+            return 0.75f;
+        }
 
-        vao = 0;
-        vbo = 0;
-        vertexShader = 0;
-        fragmentShader = 0;
-        shaderProgram = 0;
+        // For larger elements, calculate based on size and radius
+        float sizeScale = Math.min(1.0f, Math.max(width, height) / 300f);
+        float radiusScale = Math.min(1.0f, radius / 15f);
+
+        // Calculate optimal smoothing (higher for larger shapes or radiuses)
+        return 0.75f + (sizeScale * 0.5f) + (radiusScale * 0.5f);
+    }
+
+    public void cleanup() {
+        // Clean up local resources
+        if (vao != 0) {
+            GL30.glDeleteVertexArrays(vao);
+            vao = 0;
+        }
+
+        if (vbo != 0) {
+            GL15.glDeleteBuffers(vbo);
+            vbo = 0;
+        }
+
+        // Note: we don't delete the shared shader program and shaders here
+        // as they're stored in static variables and shared between instances
+
         initialized = false;
+    }
+
+    /**
+     * Full cleanup of all shared resources - call only when shutting down
+     */
+    public static void cleanupGlobal() {
+        if (programCreated) {
+            // Delete shader resources when fully shutting down
+            if (staticShaderProgram != 0) {
+                GL20.glDeleteProgram(staticShaderProgram);
+                staticShaderProgram = 0;
+            }
+
+            if (staticVertexShader != 0) {
+                GL20.glDeleteShader(staticVertexShader);
+                staticVertexShader = 0;
+            }
+
+            if (staticFragmentShader != 0) {
+                GL20.glDeleteShader(staticFragmentShader);
+                staticFragmentShader = 0;
+            }
+
+            programCreated = false;
+        }
     }
 }

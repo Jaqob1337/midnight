@@ -158,6 +158,7 @@ public class Render2D {
         shaderManager.resetClipBounds();
     }
 
+
     public boolean handleMouseClicked(double mouseX, double mouseY, int button) {
         for (int i = shapes.size() - 1; i >= 0; i--) {
             RenderShape shape = shapes.get(i);
