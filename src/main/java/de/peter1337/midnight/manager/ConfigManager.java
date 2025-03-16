@@ -188,109 +188,147 @@ public class ConfigManager {
             Module.setBypassChatCheck(true);
 
             FileReader reader = new FileReader(configFile);
-            JsonObject configJson = gson.fromJson(reader, JsonObject.class);
+            JsonObject configJson = null;
+
+            try {
+                configJson = gson.fromJson(reader, JsonObject.class);
+            } catch (com.google.gson.JsonSyntaxException e) {
+                Midnight.LOGGER.error("Invalid JSON in config file: {}", e.getMessage());
+                reader.close();
+                return;
+            }
+
+            if (configJson == null) {
+                Midnight.LOGGER.error("Failed to load config: JSON is null");
+                reader.close();
+                return;
+            }
 
             // Load ClickGUI position if available
             if (configJson.has("clickgui")) {
-                JsonObject clickGuiJson = configJson.getAsJsonObject("clickgui");
+                JsonElement clickGuiElement = configJson.get("clickgui");
 
-                if (clickGuiJson.has("x") && clickGuiJson.has("y")) {
-                    // Store the position to apply later when the GUI is opened
-                    savedGuiX = clickGuiJson.get("x").getAsFloat();
-                    savedGuiY = clickGuiJson.get("y").getAsFloat();
+                if (clickGuiElement.isJsonObject()) {
+                    JsonObject clickGuiJson = clickGuiElement.getAsJsonObject();
 
-                    // If clickGuiBackground is already available, apply it now
-                    if (clickGuiBackground != null) {
-                        clickGuiBackground.getBackground().setPosition(savedGuiX, savedGuiY);
-                        Midnight.LOGGER.info("Loaded and applied ClickGUI position: x={}, y={}", savedGuiX, savedGuiY);
-                    } else {
-                        Midnight.LOGGER.info("Loaded ClickGUI position (will apply when GUI opens): x={}, y={}", savedGuiX, savedGuiY);
+                    if (clickGuiJson.has("x") && clickGuiJson.has("y")) {
+                        // Store the position to apply later when the GUI is opened
+                        savedGuiX = clickGuiJson.get("x").getAsFloat();
+                        savedGuiY = clickGuiJson.get("y").getAsFloat();
+
+                        // If clickGuiBackground is already available, apply it now
+                        if (clickGuiBackground != null) {
+                            clickGuiBackground.getBackground().setPosition(savedGuiX, savedGuiY);
+                            Midnight.LOGGER.info("Loaded and applied ClickGUI position: x={}, y={}", savedGuiX, savedGuiY);
+                        } else {
+                            Midnight.LOGGER.info("Loaded ClickGUI position (will apply when GUI opens): x={}, y={}", savedGuiX, savedGuiY);
+                        }
                     }
+                } else {
+                    Midnight.LOGGER.warn("clickgui element is not a JsonObject, ignoring");
                 }
             }
 
             // Load modules configuration
             if (configJson.has("modules")) {
-                JsonObject modulesJson = configJson.getAsJsonObject("modules");
+                JsonElement modulesElement = configJson.get("modules");
 
-                for (Module module : ModuleManager.getModules()) {
-                    String moduleName = module.getName();
+                if (modulesElement.isJsonObject()) {
+                    JsonObject modulesJson = modulesElement.getAsJsonObject();
 
-                    if (modulesJson.has(moduleName)) {
-                        JsonObject moduleJson = modulesJson.getAsJsonObject(moduleName);
+                    for (Module module : ModuleManager.getModules()) {
+                        String moduleName = module.getName();
 
-                        // Load enabled state
-                        if (moduleJson.has("enabled")) {
-                            boolean shouldBeEnabled = moduleJson.get("enabled").getAsBoolean();
+                        if (modulesJson.has(moduleName)) {
+                            JsonElement moduleElement = modulesJson.get(moduleName);
 
-                            // Only toggle if the current state doesn't match the desired state
-                            if (shouldBeEnabled != module.isEnabled()) {
-                                module.toggle();
-                                Midnight.LOGGER.info("Set module {} state to {}", moduleName, shouldBeEnabled);
-                            }
-                        }
+                            if (moduleElement.isJsonObject()) {
+                                JsonObject moduleJson = moduleElement.getAsJsonObject();
 
-                        // Load keybind
-                        if (moduleJson.has("bind")) {
-                            String bind = moduleJson.get("bind").getAsString();
-                            if (!bind.equals(module.getBind())) {
-                                BindManager.updateBind(module, bind);
-                                Midnight.LOGGER.info("Updated bind for {} to {}", moduleName, bind);
-                            }
-                        }
+                                // Load enabled state
+                                if (moduleJson.has("enabled")) {
+                                    boolean shouldBeEnabled = moduleJson.get("enabled").getAsBoolean();
 
-                        // Load settings
-                        if (moduleJson.has("settings")) {
-                            JsonObject settingsJson = moduleJson.getAsJsonObject("settings");
-
-                            for (Setting<?> setting : module.getSettings()) {
-                                String settingName = setting.getName();
-
-                                if (settingsJson.has(settingName)) {
-                                    JsonElement settingElement = settingsJson.get(settingName);
-                                    try {
-                                        // Skip if value is already the same to avoid unnecessary setting changes
-                                        if (setting.getValue() instanceof Boolean &&
-                                                setting.getValue().equals(settingElement.getAsBoolean())) {
-                                            continue;
-                                        } else if (setting.getValue() instanceof Float &&
-                                                setting.getValue().equals(settingElement.getAsFloat())) {
-                                            continue;
-                                        } else if (setting.getValue() instanceof Double &&
-                                                setting.getValue().equals(settingElement.getAsDouble())) {
-                                            continue;
-                                        } else if (setting.getValue() instanceof Integer &&
-                                                setting.getValue().equals(settingElement.getAsInt())) {
-                                            continue;
-                                        } else if (setting.getValue() instanceof String &&
-                                                setting.getValue().equals(settingElement.getAsString())) {
-                                            continue;
-                                        }
-
-                                        // Apply the setting value based on type
-                                        if (setting.getValue() instanceof Boolean) {
-                                            setting.setValue(settingElement.getAsBoolean());
-                                        } else if (setting.getValue() instanceof Float) {
-                                            setting.setValue(settingElement.getAsFloat());
-                                        } else if (setting.getValue() instanceof Double) {
-                                            setting.setValue(settingElement.getAsDouble());
-                                        } else if (setting.getValue() instanceof Integer) {
-                                            setting.setValue(settingElement.getAsInt());
-                                        } else if (setting.getValue() instanceof String) {
-                                            setting.setValue(settingElement.getAsString());
-                                        } else {
-                                            setting.setValue(settingElement.getAsString());
-                                        }
-                                        Midnight.LOGGER.info("Loaded setting {}:{} = {}",
-                                                moduleName, settingName, settingElement);
-                                    } catch (Exception e) {
-                                        Midnight.LOGGER.error("Failed to load setting {}:{}: {}",
-                                                moduleName, settingName, e.getMessage());
+                                    // Only toggle if the current state doesn't match the desired state
+                                    if (shouldBeEnabled != module.isEnabled()) {
+                                        module.toggle();
+                                        Midnight.LOGGER.info("Set module {} state to {}", moduleName, shouldBeEnabled);
                                     }
                                 }
+
+                                // Load keybind
+                                if (moduleJson.has("bind")) {
+                                    String bind = moduleJson.get("bind").getAsString();
+                                    if (!bind.equals(module.getBind())) {
+                                        BindManager.updateBind(module, bind);
+                                        Midnight.LOGGER.info("Updated bind for {} to {}", moduleName, bind);
+                                    }
+                                }
+
+                                // Load settings
+                                if (moduleJson.has("settings")) {
+                                    JsonElement settingsElement = moduleJson.get("settings");
+
+                                    if (settingsElement.isJsonObject()) {
+                                        JsonObject settingsJson = settingsElement.getAsJsonObject();
+
+                                        for (Setting<?> setting : module.getSettings()) {
+                                            String settingName = setting.getName();
+
+                                            if (settingsJson.has(settingName)) {
+                                                JsonElement settingElement = settingsJson.get(settingName);
+                                                try {
+                                                    // Skip if value is already the same to avoid unnecessary setting changes
+                                                    if (setting.getValue() instanceof Boolean &&
+                                                            setting.getValue().equals(settingElement.getAsBoolean())) {
+                                                        continue;
+                                                    } else if (setting.getValue() instanceof Float &&
+                                                            setting.getValue().equals(settingElement.getAsFloat())) {
+                                                        continue;
+                                                    } else if (setting.getValue() instanceof Double &&
+                                                            setting.getValue().equals(settingElement.getAsDouble())) {
+                                                        continue;
+                                                    } else if (setting.getValue() instanceof Integer &&
+                                                            setting.getValue().equals(settingElement.getAsInt())) {
+                                                        continue;
+                                                    } else if (setting.getValue() instanceof String &&
+                                                            setting.getValue().equals(settingElement.getAsString())) {
+                                                        continue;
+                                                    }
+
+                                                    // Apply the setting value based on type
+                                                    if (setting.getValue() instanceof Boolean) {
+                                                        setting.setValue(settingElement.getAsBoolean());
+                                                    } else if (setting.getValue() instanceof Float) {
+                                                        setting.setValue(settingElement.getAsFloat());
+                                                    } else if (setting.getValue() instanceof Double) {
+                                                        setting.setValue(settingElement.getAsDouble());
+                                                    } else if (setting.getValue() instanceof Integer) {
+                                                        setting.setValue(settingElement.getAsInt());
+                                                    } else if (setting.getValue() instanceof String) {
+                                                        setting.setValue(settingElement.getAsString());
+                                                    } else {
+                                                        setting.setValue(settingElement.getAsString());
+                                                    }
+                                                    Midnight.LOGGER.info("Loaded setting {}:{} = {}",
+                                                            moduleName, settingName, settingElement);
+                                                } catch (Exception e) {
+                                                    Midnight.LOGGER.error("Failed to load setting {}:{}: {}",
+                                                            moduleName, settingName, e.getMessage());
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        Midnight.LOGGER.warn("settings element for module {} is not a JsonObject, ignoring", moduleName);
+                                    }
+                                }
+                            } else {
+                                Midnight.LOGGER.warn("module {} element is not a JsonObject, ignoring", moduleName);
                             }
                         }
                     }
+                } else {
+                    Midnight.LOGGER.warn("modules element is not a JsonObject, ignoring");
                 }
             }
 
@@ -394,16 +432,35 @@ public class ConfigManager {
         }
 
         // If the file exists, update only the ClickGUI position
-        try (FileReader reader = new FileReader(configFile)) {
-            JsonObject configJson = gson.fromJson(reader, JsonObject.class);
+        try {
+            JsonObject configJson = null;
+
+            // Add a try-catch block specifically for the JSON parsing
+            try (FileReader reader = new FileReader(configFile)) {
+                configJson = gson.fromJson(reader, JsonObject.class);
+            } catch (com.google.gson.JsonSyntaxException e) {
+                // Handle the case where the JSON is invalid
+                Midnight.LOGGER.error("Invalid JSON in config file, creating new one: {}", e.getMessage());
+                configJson = new JsonObject();
+            }
+
+            // If we couldn't load the config JSON, create a new one
+            if (configJson == null) {
+                configJson = new JsonObject();
+            }
 
             // Update or create the clickgui section
             JsonObject clickGuiJson;
-            if (configJson.has("clickgui")) {
+            if (configJson.has("clickgui") && configJson.get("clickgui").isJsonObject()) {
                 clickGuiJson = configJson.getAsJsonObject("clickgui");
             } else {
                 clickGuiJson = new JsonObject();
                 configJson.add("clickgui", clickGuiJson);
+            }
+
+            // Make sure modules section exists
+            if (!configJson.has("modules") || !configJson.get("modules").isJsonObject()) {
+                configJson.add("modules", new JsonObject());
             }
 
             // Update position
