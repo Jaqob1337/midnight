@@ -17,7 +17,7 @@ public class Watermark {
     private static final int MAIN_COLOR = (255 << 24) | (100 << 16) | (100 << 8) | 255;
 
     // RGB values for black (0, 0, 0) with partial alpha (85)
-    private static final int SHADOW_COLOR = (120 << 24) | (0 << 16) | (0 << 8) | 0;
+    private static final int SHADOW_COLOR = (120 << 24) | (0 << 16) | (0 << 2) | 0;
 
     // Desired font size for the watermark.
     private static final float FONT_SIZE = 14f;

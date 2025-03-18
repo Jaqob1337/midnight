@@ -11,7 +11,7 @@ import net.minecraft.world.World;
 /**
  * Utility class for raytrace operations
  */
-public class RaytraceUtil {
+public class RayCastUtil {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
     /**
@@ -217,7 +217,7 @@ public class RaytraceUtil {
         }
 
         // Check center of the entity
-        Vec3d centerTarget = entity.getPos().add(0, entity.getHeight() / 2, 0);
+        Vec3d centerTarget = new Vec3d((box.minX + box.maxX) / 2, (box.minY + box.maxY) / 2, (box.minZ + box.maxZ) / 2);
         if (canSeePosition(entity, centerTarget)) {
             return centerTarget;
         }
