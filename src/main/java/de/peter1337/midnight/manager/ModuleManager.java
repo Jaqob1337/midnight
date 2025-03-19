@@ -4,10 +4,7 @@ import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.modules.combat.Aura;
 import de.peter1337.midnight.modules.movement.Speed;
 import de.peter1337.midnight.modules.movement.Sprint;
-import de.peter1337.midnight.modules.player.InvManager;
-import de.peter1337.midnight.modules.player.NoSlow;
-import de.peter1337.midnight.modules.player.Stealer;
-import de.peter1337.midnight.modules.player.Velocity;
+import de.peter1337.midnight.modules.player.*;
 import de.peter1337.midnight.modules.render.ClickGuiModule;
 import de.peter1337.midnight.modules.render.ESP;
 import de.peter1337.midnight.modules.misc.NotificationBlocker;
@@ -32,6 +29,7 @@ public class ModuleManager {
         registerModule(new Aura());
         registerModule(new Speed());
         registerModule(new NoSlow());
+        registerModule(new Scaffold());
     }
 
     private static void registerModule(Module module) {

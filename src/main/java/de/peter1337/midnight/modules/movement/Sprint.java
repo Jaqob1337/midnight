@@ -3,7 +3,10 @@ package de.peter1337.midnight.modules.movement;
 import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.modules.Category;
 import de.peter1337.midnight.modules.Setting;
+import de.peter1337.midnight.modules.player.Scaffold;
+import de.peter1337.midnight.manager.ModuleManager;
 import java.util.Arrays;
+import java.util.List;
 import net.minecraft.client.MinecraftClient;
 
 public class Sprint extends Module {
@@ -59,6 +62,14 @@ public class Sprint extends Module {
     @Override
     public void onUpdate() {
         if (!isEnabled() || mc.player == null) return;
+
+        // IMPORTANT: Check for active Scaffold module with sprint disabled FIRST
+        // Do this check EVERY tick to ensure we don't override Scaffold's setting
+        if (isScaffoldBlockingSprint()) {
+            // If Scaffold is active and blocking sprint, don't try to sprint
+            // This is critical - don't modify sprint state at all, just exit
+            return;
+        }
 
         boolean shouldSprint = false;
         String mode = sprintMode.getValue();
@@ -119,8 +130,32 @@ public class Sprint extends Module {
                 lastJumpTime = currentTime;
             }
         }
+    }
 
-        // Debug: Uncomment to print the current sprint mode.
-        // System.out.println("Sprint Mode: " + sprintMode.getValue());
+    /**
+     * Checks if the Scaffold module is active and has sprint disabled
+     * @return true if Scaffold is blocking sprinting
+     */
+    private boolean isScaffoldBlockingSprint() {
+        try {
+            // Find the Scaffold module in all registered modules
+            for (Module module : ModuleManager.getModules()) {
+                if (module instanceof Scaffold) {
+                    // Found Scaffold module - check if it's enabled and blocking sprint
+                    if (module.isEnabled()) {
+                        Scaffold scaffold = (Scaffold) module;
+                        // If Scaffold allows sprint (its sprint setting is true), return false
+                        // If Scaffold blocks sprint (its sprint setting is false), return true
+                        return !scaffold.isSprintAllowed();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // If there's any error accessing the module, log it
+            System.out.println("Error checking Scaffold sprint status: " + e.getMessage());
+        }
+
+        // Default: don't block sprint if Scaffold isn't found or enabled
+        return false;
     }
 }

@@ -67,6 +67,11 @@ public class Aura extends Module {
                     "Silent: server-only, Client: visible, Body: shows on body only")
     );
 
+    // New rotation speed setting
+    private final Setting<Float> rotationSpeed = register(
+            new Setting<>("RotationSpeed", 0.4f, 0.0f, 1.0f, "Speed of rotation to targets (0 = smooth, 1 = instant)")
+    );
+
     private final Setting<Boolean> throughWalls = register(
             new Setting<>("ThroughWalls", Boolean.FALSE, "Attack through walls")
     );
@@ -536,7 +541,7 @@ public class Aura extends Module {
         if (primaryTarget == null || targetPoint == null) return;
 
         // Calculate the rotations to the target point
-        float[] rotations = RotationHandler.calculateLookAt(targetPoint);
+        float[] targetRotations = RotationHandler.calculateLookAt(targetPoint);
 
         // Determine rotation mode parameters
         boolean silent;
@@ -568,29 +573,61 @@ public class Aura extends Module {
                 break;
         }
 
-        // If body rotation mode, use the specialized method
-        if (bodyOnly) {
+        // Get the rotation speed - where 0 = smooth, 1 = instant
+        float speedFactor = rotationSpeed.getValue();
+
+        // If speed is 1.0, use instant rotations
+        if (speedFactor >= 0.99f) {
+            // Use direct instant rotation
             RotationHandler.requestRotation(
-                    rotations[0],
-                    rotations[1],
-                    ROTATION_PRIORITY,
-                    25, // Update interval in milliseconds
-                    true, // silent
-                    true, // bodyOnly
-                    state -> rotating = true
-            );
-        } else {
-            // Use direct rotation
-            RotationHandler.requestRotation(
-                    rotations[0],
-                    rotations[1],
+                    targetRotations[0],
+                    targetRotations[1],
                     ROTATION_PRIORITY,
                     25, // Update interval in milliseconds
                     silent,
-                    false,
+                    bodyOnly,
                     state -> rotating = true
             );
+            return;
         }
+
+        // For lower speeds, interpolate between current and target rotations
+        // Get current rotations based on mode
+        float currentYaw, currentPitch;
+        if (silent || bodyOnly) {
+            currentYaw = RotationHandler.getServerYaw();
+            currentPitch = RotationHandler.getServerPitch();
+        } else {
+            currentYaw = mc.player.getYaw();
+            currentPitch = mc.player.getPitch();
+        }
+
+        // Map the speed factor (0-1) to a more consistent rotation speed
+        // Higher values = faster rotations
+        float actualSpeed = 0.2f + (speedFactor * 0.8f);
+
+        // Calculate the angle differences
+        float yawDiff = targetRotations[0] - currentYaw;
+        // Normalize yaw difference to -180 to 180 range
+        while (yawDiff > 180) yawDiff -= 360;
+        while (yawDiff < -180) yawDiff += 360;
+
+        float pitchDiff = targetRotations[1] - currentPitch;
+
+        // Apply speed factor
+        float newYaw = currentYaw + (yawDiff * actualSpeed);
+        float newPitch = currentPitch + (pitchDiff * actualSpeed);
+
+        // Apply the interpolated rotation
+        RotationHandler.requestRotation(
+                newYaw,
+                newPitch,
+                ROTATION_PRIORITY,
+                25, // Update interval in milliseconds
+                silent,
+                bodyOnly,
+                state -> rotating = true
+        );
     }
 
     /**
