@@ -31,7 +31,7 @@ public class ClickGuiCategoryButton {
     private static final float BUTTON_RADIUS = 5f;
     // Adjust left margin for category buttons
     private static final float LEFT_MARGIN = 16f; // Reduced from the default to move buttons left
-    private static final Color BUTTON_COLOR = new Color(40, 40, 60, 255);
+    private static final Color BUTTON_COLOR = new Color(40, 40, 60, 0);
     private static final Color BUTTON_HOVER_COLOR = new Color(50, 50, 70, 255);
     private static final Color BUTTON_SELECTED_COLOR = new Color(60, 60, 80, 255);
     private static final Color BUTTON_SELECTED_HOVER_COLOR = new Color(70, 70, 90, 255);

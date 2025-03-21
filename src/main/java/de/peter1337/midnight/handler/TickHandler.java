@@ -4,6 +4,7 @@ import de.peter1337.midnight.events.KeyEvent;
 import de.peter1337.midnight.manager.ModuleManager;
 import de.peter1337.midnight.manager.command.CommandAutoComplete;
 import de.peter1337.midnight.modules.combat.Aura;
+import de.peter1337.midnight.modules.player.Scaffold;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,11 +40,18 @@ public class TickHandler {
                 client.getWindow().setTitle(Midnight.CLIENT_NAME + " " + Midnight.VERSION);
             }
 
-            // Call Aura's preUpdate method during PRE tick
+            // Call pre-update methods during PRE tick
             if (client != null && client.player != null) {
+                // Process Aura's preUpdate
                 Aura aura = (Aura) ModuleManager.getModule("Aura");
                 if (aura != null && aura.isEnabled()) {
                     aura.preUpdate();
+                }
+
+                // Add Scaffold preUpdate call
+                Scaffold scaffold = (Scaffold) ModuleManager.getModule("Scaffold");
+                if (scaffold != null && scaffold.isEnabled()) {
+                    scaffold.preUpdate();
                 }
             }
         });

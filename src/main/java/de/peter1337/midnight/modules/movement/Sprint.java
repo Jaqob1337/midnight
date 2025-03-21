@@ -59,17 +59,18 @@ public class Sprint extends Module {
         sprintToggled = false;
     }
 
-    @Override
-    public void onUpdate() {
-        if (!isEnabled() || mc.player == null) return;
+        @Override
+        public void onUpdate() {
+            if (!isEnabled() || mc.player == null) return;
 
-        // IMPORTANT: Check for active Scaffold module with sprint disabled FIRST
-        // Do this check EVERY tick to ensure we don't override Scaffold's setting
-        if (isScaffoldBlockingSprint()) {
-            // If Scaffold is active and blocking sprint, don't try to sprint
-            // This is critical - don't modify sprint state at all, just exit
-            return;
-        }
+            // IMPROVED CHECK: Always verify Scaffold state at the start of every update
+            // If Scaffold is active and blocking sprint, don't just return - actively disable sprint
+            if (isScaffoldBlockingSprint()) {
+                if (mc.player.isSprinting()) {
+                    mc.player.setSprinting(false);
+                }
+                return;
+            }
 
         boolean shouldSprint = false;
         String mode = sprintMode.getValue();

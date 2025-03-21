@@ -121,8 +121,11 @@ public class Scaffold extends Module {
         return sprint.getValue();
     }
 
-    @Override
-    public void onUpdate() {
+    /**
+     * Pre-update method called during the PRE tick phase
+     * Handles horizontal block placements and basic state management
+     */
+    public void preUpdate() {
         if (!isEnabled() || mc.player == null || mc.world == null) return;
 
         ClientPlayerEntity player = mc.player;
@@ -150,58 +153,107 @@ public class Scaffold extends Module {
             player.setSprinting(true);
         }
 
-        // Handle tower (vertical movement when pressing space)
-        handleTower();
-
         // Reset current placement if we're not actively placing
         if (!isPlacing) {
             currentPlacement = null;
         }
-        isPlacing = false;
 
-        // Get the block position where we want to place
-        BlockPos targetPos = getPlacementPosition();
-        if (targetPos == null) return;
+        // Flag to check if we should place a block in this tick
+        boolean shouldPlaceBlock = true;
 
-        // Apply placement delay if configured
-        long currentTime = System.currentTimeMillis();
-        float delayMs = delay.getValue() * 1000;
-        if (currentTime - lastPlacementTime < delayMs) return;
+        // Skip horizontal placement if currently jumping for tower
+        if (isJumping()) {
+            shouldPlaceBlock = false;
+        }
 
-        // Check if we can place a block
-        if (canPlaceBlock(targetPos)) {
-            // Select a block in the hotbar if needed
-            int blockSlot = findBlockInHotbar();
-            if (blockSlot == -1) return; // No blocks available
-
-            // Switch to the block slot if enabled
-            int originalSlot = player.getInventory().selectedSlot;
-            if (autoSwitch.getValue()) {
-                player.getInventory().selectedSlot = blockSlot;
-            }
-
-            // Check if we're holding a block now
-            ItemStack handStack = player.getMainHandStack();
-            if (!(handStack.getItem() instanceof BlockItem)) return;
-
-            // Find the best way to place this block
-            if (advancedRaycast.getValue()) {
-                // Use advanced raycasting from RayCastUtil
-                placeBlockWithAdvancedRaycast(targetPos, player);
-            } else {
-                // Use the original placement method
-                placeBlockWithSimpleRaycast(targetPos, player);
-            }
-
-            // Switch back to original slot if needed
-            if (autoSwitch.getValue()) {
-                player.getInventory().selectedSlot = originalSlot;
+        // Handle horizontal block placements
+        if (shouldPlaceBlock) {
+            // Get the block position where we want to place
+            BlockPos targetPos = getPlacementPosition();
+            if (targetPos != null) {
+                placeBlockAt(targetPos);
             }
         }
 
         // Always apply backward rotation even if we're not placing blocks
         if (rotations.getValue() && !isPlacing) {
             handleConstantRotation();
+        }
+    }
+
+    @Override
+    public void onUpdate() {
+        if (!isEnabled() || mc.player == null || mc.world == null) return;
+
+        // Handle tower (vertical movement) in POST tick
+        if (tower.getValue() && isJumping()) {
+            // Handle jumping
+            handleTower();
+
+            // Place blocks beneath player for tower
+            BlockPos towerPos = getTowerPlacementPosition();
+            if (towerPos != null) {
+                placeBlockAt(towerPos);
+            }
+        }
+
+        // Reset placement flag for next tick
+        isPlacing = false;
+    }
+
+    /**
+     * Helper method to determine if player is jumping for tower
+     */
+    private boolean isJumping() {
+        return tower.getValue() && mc.options.jumpKey.isPressed();
+    }
+
+    /**
+     * Gets position for tower placement (directly below player)
+     */
+    private BlockPos getTowerPlacementPosition() {
+        if (mc.player == null) return null;
+        Vec3d pos = mc.player.getPos();
+        return new BlockPos((int)Math.floor(pos.x), (int)Math.floor(pos.y) - 1, (int)Math.floor(pos.z));
+    }
+
+    /**
+     * Places a block at the specified position
+     */
+    private void placeBlockAt(BlockPos targetPos) {
+        if (!canPlaceBlock(targetPos)) return;
+
+        // Apply placement delay if configured
+        long currentTime = System.currentTimeMillis();
+        float delayMs = delay.getValue() * 1000;
+        if (currentTime - lastPlacementTime < delayMs) return;
+
+        // Select a block in the hotbar if needed
+        int blockSlot = findBlockInHotbar();
+        if (blockSlot == -1) return; // No blocks available
+
+        // Switch to the block slot if enabled
+        int originalSlot = mc.player.getInventory().selectedSlot;
+        if (autoSwitch.getValue()) {
+            mc.player.getInventory().selectedSlot = blockSlot;
+        }
+
+        // Check if we're holding a block now
+        ItemStack handStack = mc.player.getMainHandStack();
+        if (!(handStack.getItem() instanceof BlockItem)) return;
+
+        // Find the best way to place this block
+        if (advancedRaycast.getValue()) {
+            // Use advanced raycasting from RayCastUtil
+            placeBlockWithAdvancedRaycast(targetPos, mc.player);
+        } else {
+            // Use the original placement method
+            placeBlockWithSimpleRaycast(targetPos, mc.player);
+        }
+
+        // Switch back to original slot if needed
+        if (autoSwitch.getValue()) {
+            mc.player.getInventory().selectedSlot = originalSlot;
         }
     }
 
