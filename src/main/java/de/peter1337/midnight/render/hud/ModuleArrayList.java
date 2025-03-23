@@ -13,8 +13,8 @@ import java.util.stream.Collectors;
 
 public class ModuleArrayList {
 
-    private static final int RIGHT_MARGIN = 8;
-    private static final int TOP_MARGIN = 2;
+    private static final int RIGHT_MARGIN = 14;
+    private static final int TOP_MARGIN = 5;
     // Desired font size for the module array list.
     private static final float FONT_SIZE = 10f;
 
