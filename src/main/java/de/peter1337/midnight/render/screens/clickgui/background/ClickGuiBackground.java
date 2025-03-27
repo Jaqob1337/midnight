@@ -9,6 +9,7 @@ public class ClickGuiBackground {
     private final RenderShape shadow;
     private final RenderShape background;
     private final RenderShape moduleSection;
+    private final RenderShape imagePanel;
 
     private static final float PANEL_WIDTH = 380f;
     private static final float PANEL_HEIGHT = 200f;
@@ -18,13 +19,19 @@ public class ClickGuiBackground {
     private static final float MODULE_SECTION_TOP_MARGIN = 10f;
     private static final float MODULE_SECTION_RADIUS = 15f;
 
-    // Shadow settings
+    // Image panel settings
+    private static final float IMAGE_PANEL_WIDTH = 150f;
+    private static final float IMAGE_PANEL_HEIGHT = 150f;
+    private static final float IMAGE_PANEL_MARGIN = 15f;
+    private static final float IMAGE_PANEL_RADIUS = 10f;
 
+    // Shadow settings
     private static final float SHADOW_EXPAND = 0.9f;
 
     // Colors
     private static final Color PANEL_COLOR = new Color(25, 25, 45, 255);
     private static final Color MODULE_SECTION_COLOR = new Color(30, 30, 50, 255);
+    private static final Color IMAGE_PANEL_COLOR = new Color(35, 35, 55, 255);
     private static final Color OVERLAY_COLOR = new Color(0, 0, 0, 120);
     private static final Color SHADOW_COLOR = new Color(25, 25, 45, 255);
 
@@ -77,9 +84,28 @@ public class ClickGuiBackground {
                 MODULE_SECTION_COLOR
         );
 
+        // Create image panel - placed to the right of the module section with some margin
+        float imagePanelX = moduleSectionX + moduleSectionWidth + IMAGE_PANEL_MARGIN;
+        float imagePanelY = panelY + (PANEL_HEIGHT - IMAGE_PANEL_HEIGHT) / 2;
+
+        imagePanel = render2D.createRoundedRect(
+                imagePanelX,
+                imagePanelY,
+                IMAGE_PANEL_WIDTH,
+                IMAGE_PANEL_HEIGHT,
+                IMAGE_PANEL_RADIUS,
+                IMAGE_PANEL_COLOR
+        );
+
         // Important: attach the module section first, then the background will inherit its properties
         moduleSection.attachTo(background, PANEL_WIDTH * 0.3f + MODULE_SECTION_MARGIN, MODULE_SECTION_TOP_MARGIN);
         moduleSection.setUseCombinedClip(false);
+
+        // Attach the image panel to the background
+        imagePanel.attachTo(background,
+                moduleSectionX + moduleSectionWidth + IMAGE_PANEL_MARGIN - panelX,
+                (PANEL_HEIGHT - IMAGE_PANEL_HEIGHT) / 2);
+        imagePanel.setUseCombinedClip(false);
     }
 
     /**
@@ -99,6 +125,10 @@ public class ClickGuiBackground {
 
     public RenderShape getModuleSection() {
         return moduleSection;
+    }
+
+    public RenderShape getImagePanel() {
+        return imagePanel;
     }
 
     public RenderShape getOverlay() {

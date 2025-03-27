@@ -3,7 +3,7 @@ package de.peter1337.midnight.modules.movement;
 import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.modules.Category;
 import de.peter1337.midnight.modules.Setting;
-import de.peter1337.midnight.modules.player.Scaffold;
+import de.peter1337.midnight.modules.player.Scaffold; // Ensure this matches your Scaffold class package/name
 import de.peter1337.midnight.manager.ModuleManager;
 import java.util.Arrays;
 import java.util.List;
@@ -27,8 +27,11 @@ public class Sprint extends Module {
     );
 
     // Dropdown setting for sprint mode.
+    // Removed unimplemented "Toggle2", "Toggle4"
     private final Setting<String> sprintMode = register(
-            new Setting<>("SprintMode", "Default", Arrays.asList("Default", "Hold", "Toggle", "Toggle2", "Toggle4"), "Select sprint mode")
+            new Setting<>("SprintMode", "Default",
+                    Arrays.asList("Default", "Hold", "Toggle"), // Cleaned list
+                    "Select sprint mode")
     );
 
     // Timestamp to track the last jump.
@@ -44,89 +47,98 @@ public class Sprint extends Module {
 
     @Override
     public void onEnable() {
-        if (mc.player != null) {
-            mc.player.setSprinting(true);
-        }
-        sprintToggled = false;
-        wasSprintKeyPressed = false;
+        // Don't force sprint immediately, let onUpdate handle it based on conditions
+        sprintToggled = false; // Reset toggle state
+        wasSprintKeyPressed = mc.options.sprintKey.isPressed(); // Initialize key state
     }
 
     @Override
     public void onDisable() {
-        if (mc.player != null) {
+        // Ensure sprint is turned off when the module is disabled
+        if (mc.player != null && mc.player.isSprinting()) {
             mc.player.setSprinting(false);
         }
-        sprintToggled = false;
+        sprintToggled = false; // Reset toggle state
     }
 
-        @Override
-        public void onUpdate() {
-            if (!isEnabled() || mc.player == null) return;
+    @Override
+    public void onUpdate() {
+        if (!isEnabled() || mc.player == null || mc.world == null) return;
 
-            // IMPROVED CHECK: Always verify Scaffold state at the start of every update
-            // If Scaffold is active and blocking sprint, don't just return - actively disable sprint
-            if (isScaffoldBlockingSprint()) {
-                if (mc.player.isSprinting()) {
-                    mc.player.setSprinting(false);
-                }
-                return;
+        // --- Scaffold Interaction Check ---
+        // If Scaffold is active and blocking sprint, force sprint off and stop.
+        if (isScaffoldBlockingSprint()) {
+            if (mc.player.isSprinting()) {
+                mc.player.setSprinting(false);
             }
+            return; // Don't proceed with Sprint module logic
+        }
 
-        boolean shouldSprint = false;
+        // --- Determine if Sprinting is Intended ---
+        boolean intendToSprint = false;
         String mode = sprintMode.getValue();
 
         switch (mode) {
             case "Default":
-                // Use omniSprint setting to decide based on movement input.
+                // Check movement input based on omniSprint setting
                 if (omniSprint.getValue()) {
-                    shouldSprint = mc.player.input.movementForward != 0 || mc.player.input.movementSideways != 0;
+                    intendToSprint = mc.player.input.movementForward != 0f || mc.player.input.movementSideways != 0f;
                 } else {
-                    shouldSprint = mc.player.input.movementForward > 0;
+                    intendToSprint = mc.player.input.movementForward > 0f;
                 }
                 break;
+
             case "Hold":
-                // Only sprint while the sprint key is held.
-                shouldSprint = mc.options.sprintKey.isPressed();
+                // Check if the vanilla sprint key is held
+                intendToSprint = mc.options.sprintKey.isPressed();
                 break;
+
             case "Toggle":
-                // Toggle sprint when the sprint key is pressed.
+                // Handle toggle logic based on vanilla sprint key press edge
                 boolean currentlyPressed = mc.options.sprintKey.isPressed();
                 if (currentlyPressed && !wasSprintKeyPressed) {
-                    sprintToggled = !sprintToggled;
+                    sprintToggled = !sprintToggled; // Flip the toggle state
                 }
-                wasSprintKeyPressed = currentlyPressed;
+                wasSprintKeyPressed = currentlyPressed; // Update key state for next tick
 
-                // When toggled on, use movement input (optionally omniSprint).
+                // If toggled on, check movement input based on omniSprint
                 if (sprintToggled) {
                     if (omniSprint.getValue()) {
-                        shouldSprint = mc.player.input.movementForward != 0 || mc.player.input.movementSideways != 0;
+                        intendToSprint = mc.player.input.movementForward != 0f || mc.player.input.movementSideways != 0f;
                     } else {
-                        shouldSprint = mc.player.input.movementForward > 0;
+                        intendToSprint = mc.player.input.movementForward > 0f;
                     }
                 } else {
-                    shouldSprint = false;
+                    intendToSprint = false; // Not sprinting if toggled off
                 }
                 break;
+
             default:
-                shouldSprint = false;
+                // Should not happen with cleaned list, but default to false
+                intendToSprint = false;
                 break;
         }
 
-        // Additional checks.
-        if (shouldSprint) {
-            if (mc.player.isSneaking() || mc.player.isUsingItem() || mc.player.horizontalCollision) {
-                shouldSprint = false;
-            }
+        // --- Check Sprinting Conditions ---
+        boolean canSprint = intendToSprint &&
+                !mc.player.isSneaking() &&
+                !mc.player.isUsingItem() &&
+                !mc.player.horizontalCollision &&
+                mc.player.getHungerManager().getFoodLevel() > 6; // Added hunger check
+
+        // --- Apply Sprint State ---
+        // Set sprinting state only if it needs changing
+        if (mc.player.isSprinting() != canSprint) {
+            mc.player.setSprinting(canSprint);
         }
 
-        // Apply sprint state.
-        mc.player.setSprinting(shouldSprint);
 
-        // Handle JumpSprint.
-        if (shouldSprint && jumpSprint.getValue() && mc.player.isOnGround()) {
+        // --- Handle JumpSprint ---
+        if (canSprint && jumpSprint.getValue() && mc.player.isOnGround()) {
             long currentTime = System.currentTimeMillis();
             float delaySeconds = jumpDelay.getValue();
-            if (currentTime - lastJumpTime >= delaySeconds * 1000) {
+            // Ensure delay is not zero to avoid rapid jumping
+            if (delaySeconds > 0 && currentTime - lastJumpTime >= delaySeconds * 1000) {
                 mc.player.jump();
                 lastJumpTime = currentTime;
             }
@@ -134,29 +146,37 @@ public class Sprint extends Module {
     }
 
     /**
-     * Checks if the Scaffold module is active and has sprint disabled
-     * @return true if Scaffold is blocking sprinting
+     * Checks if the Scaffold module is active and configured to disallow sprinting.
+     * Relies on Scaffold having a public boolean isSprintAllowed() method.
+     * @return true if Scaffold is blocking sprinting, false otherwise.
      */
     private boolean isScaffoldBlockingSprint() {
         try {
-            // Find the Scaffold module in all registered modules
+            // Find the Scaffold module instance
+            // Using ModuleManager.getModule("Scaffold") might be slightly cleaner if names are unique and stable
+            Module scaffoldModule = ModuleManager.getModule("Scaffold"); // Assuming "Scaffold" is the registered name
+
+            if (scaffoldModule instanceof Scaffold scaffold && scaffold.isEnabled()) {
+                // If Scaffold module exists, is enabled, and its setting disallows sprint, return true.
+                return !scaffold.isSprintAllowed();
+            }
+
+            // Alternative: Iterate if getModule(name) isn't reliable
+            /*
             for (Module module : ModuleManager.getModules()) {
-                if (module instanceof Scaffold) {
-                    // Found Scaffold module - check if it's enabled and blocking sprint
-                    if (module.isEnabled()) {
-                        Scaffold scaffold = (Scaffold) module;
-                        // If Scaffold allows sprint (its sprint setting is true), return false
-                        // If Scaffold blocks sprint (its sprint setting is false), return true
-                        return !scaffold.isSprintAllowed();
-                    }
+                if (module instanceof Scaffold scaffold && module.isEnabled()) {
+                    // Found enabled Scaffold module - check its preference
+                    return !scaffold.isSprintAllowed();
                 }
             }
+            */
         } catch (Exception e) {
-            // If there's any error accessing the module, log it
-            System.out.println("Error checking Scaffold sprint status: " + e.getMessage());
+            // Log error if something goes wrong finding/checking the module
+            System.err.println("Error checking Scaffold sprint status: " + e.getMessage());
+            e.printStackTrace(); // Print stack trace for debugging
         }
 
-        // Default: don't block sprint if Scaffold isn't found or enabled
+        // Default: Scaffold is not blocking sprint (module not found, not enabled, or allows sprint)
         return false;
     }
 }

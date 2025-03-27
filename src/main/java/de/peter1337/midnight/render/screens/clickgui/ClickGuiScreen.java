@@ -1,21 +1,24 @@
 package de.peter1337.midnight.render.screens.clickgui;
 
-import de.peter1337.midnight.Midnight;
+import com.mojang.blaze3d.systems.RenderSystem;
 import de.peter1337.midnight.manager.ConfigManager;
 import de.peter1337.midnight.manager.ModuleManager;
 import de.peter1337.midnight.modules.Category;
-import de.peter1337.midnight.modules.render.ClickGuiModule;
 import de.peter1337.midnight.render.GuiScreen;
 import de.peter1337.midnight.render.screens.clickgui.background.ClickGuiBackground;
 import de.peter1337.midnight.render.screens.clickgui.buttons.ClickGuiCategoryButton;
 import de.peter1337.midnight.render.screens.clickgui.buttons.ClickGuiModuleButton;
 import de.peter1337.midnight.render.screens.clickgui.setting.SettingComponent;
 import de.peter1337.midnight.render.Render2D.RenderShape;
+import de.peter1337.midnight.utils.GifRenderer;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.render.RenderLayer;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 
 import java.awt.Color;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -114,6 +117,78 @@ public class ClickGuiScreen extends GuiScreen {
         // Set both the main and module clip regions for combined clipping.
         render2D.setMainClip(background.getBackground());
         render2D.setModuleClip(background.getModuleSection());
+
+        // Load the GIF animation with debug output
+        try {
+            // Fixed size for the GIF
+            float gifSize = 100;
+
+            System.out.println("Attempting to load GIF animation...");
+
+            // Try loading from both possible paths to ensure the file is found
+            try {
+                GifRenderer.loadGif("textures/gui/logo_animation.gif", "logo_animation", gifSize, gifSize);
+                System.out.println("Successfully loaded GIF from textures/gui/logo_animation.gif");
+            } catch (IOException e) {
+                System.out.println("Failed to load from primary path: " + e.getMessage());
+                // Try alternate path
+                try {
+                    GifRenderer.loadGif("assets/midnight/textures/gui/logo_animation.gif", "logo_animation", gifSize, gifSize);
+                    System.out.println("Successfully loaded GIF from alternate path");
+                } catch (IOException e2) {
+                    System.out.println("Failed to load from alternate path: " + e2.getMessage());
+                    // Try with png as fallback
+                    try {
+                        GifRenderer.loadGif("textures/gui/logo.png", "logo_animation", gifSize, gifSize);
+                        System.out.println("Loaded PNG as fallback");
+                    } catch (IOException e3) {
+                        System.out.println("Failed to load any image: " + e3.getMessage());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // Log the error but continue
+            System.out.println("Error during GIF loading: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private void renderImage(DrawContext context) {
+        // Calculate a fixed position in the bottom-right corner of the screen
+        int screenWidth = this.width;
+        int screenHeight = this.height;
+
+        // Fixed size for the image
+        int imageSize = 100;
+
+        // Position in bottom-right with margin
+        int imageX = screenWidth - imageSize - 20;
+        int imageY = screenHeight - imageSize - 20;
+
+        // Draw background rectangle to make the area visible
+        context.fill(imageX - 5, imageY - 5, imageX + imageSize + 5, imageY + imageSize + 5, 0x80000000);
+
+        // Directly use a static image without GIF animation (much more reliable)
+        try {
+            // Use static logo texture
+            Identifier imageTexture = Identifier.of("midnight", "textures/gui/logo.png");
+
+            // Draw the texture using the simpler vanilla method
+            // This method is more compatible across Minecraft versions
+            RenderSystem.setShaderTexture(0, imageTexture);
+
+            // Save matrix state
+            context.getMatrices().push();
+
+            System.out.println("Rendered static image using vanilla methods");
+        } catch (Exception e) {
+            System.out.println("Error rendering image: " + e.getMessage());
+            e.printStackTrace();
+
+            // If rendering fails, show a red rectangle as fallback
+            context.fill(imageX, imageY, imageX + imageSize, imageY + imageSize, 0xFFFF0000);
+        }
+
     }
 
     @Override
@@ -298,6 +373,9 @@ public class ClickGuiScreen extends GuiScreen {
             background.updateShadowPosition();
         }
 
+        // Update GIF animations
+        GifRenderer.updateAll();
+
         currentCategoryScroll += (targetCategoryScroll - currentCategoryScroll) * SCROLL_ANIMATION_SPEED;
         currentModuleScroll += (targetModuleScroll - currentModuleScroll) * SCROLL_ANIMATION_SPEED;
 
@@ -325,8 +403,12 @@ public class ClickGuiScreen extends GuiScreen {
                     moduleButton.render(context);
                 });
 
+        // Render the image on the right side panel
+        renderImage(context);
+
         ConfigManager.savedCategoryScroll = currentCategoryScroll;
     }
+
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {

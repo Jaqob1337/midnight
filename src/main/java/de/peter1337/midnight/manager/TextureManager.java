@@ -28,51 +28,42 @@ public class TextureManager {
     public static void drawClippedTexture(DrawContext context, Identifier texture,
                                           float x, float y, float width, float height,
                                           float clipX, float clipY, float clipWidth, float clipHeight) {
-        // Fast rejection test - skip if completely outside clip bounds
-        if (x >= clipX + clipWidth || y >= clipY + clipHeight ||
-                x + width <= clipX || y + height <= clipY) {
-            return;
-        }
-
-        // Throttle texture operations for better performance
-        long currentTime = System.currentTimeMillis();
-        if (currentTime - lastTextureOpTime < TEXTURE_OP_THROTTLE) {
-            // Only allow small movements to pass the throttle
-            // If texture is being drawn exactly where it was before, no need to throttle
-            if (Math.abs(lastDrawX - x) > 1 || Math.abs(lastDrawY - y) > 1) {
-                Thread.yield(); // Just yield instead of skip to avoid flickering
-            }
-        }
-        lastTextureOpTime = currentTime;
-        lastDrawX = x;
-        lastDrawY = y;
-
-        // Calculate visible portion with integer precision
-        int visibleX = Math.max((int)x, (int)clipX);
-        int visibleY = Math.max((int)y, (int)clipY);
-        int visibleWidth = (int)Math.min(x + width, clipX + clipWidth) - visibleX;
-        int visibleHeight = (int)Math.min(y + height, clipY + clipHeight) - visibleY;
-
-        // Ensure we don't try to draw zero or negative dimensions
-        if (visibleWidth <= 0 || visibleHeight <= 0) {
-            return;
-        }
-
-        // Calculate UV coordinates for the visible portion
-        float u1 = (visibleX - x) / width;
-        float v1 = (visibleY - y) / height;
-        float u2 = u1 + (visibleWidth / width);
-        float v2 = v1 + (visibleHeight / height);
-
-        // Save OpenGL state
-        boolean blendWasEnabled = GL11.glIsEnabled(GL11.GL_BLEND);
-        int previousTexture = GL11.glGetInteger(GL11.GL_TEXTURE_BINDING_2D);
-
         try {
-            // Enable blending and set shader
-            RenderSystem.enableBlend();
-            RenderSystem.setShaderColor(1.0f, 1.0f, 1.0f, 1.0f);
-            RenderSystem.setShaderTexture(0, texture);
+            // Fast rejection test - skip if completely outside clip bounds
+            if (x >= clipX + clipWidth || y >= clipY + clipHeight ||
+                    x + width <= clipX || y + height <= clipY) {
+                return;
+            }
+
+            // Throttle texture operations for better performance
+            long currentTime = System.currentTimeMillis();
+            if (currentTime - lastTextureOpTime < TEXTURE_OP_THROTTLE) {
+                // Only allow small movements to pass the throttle
+                // If texture is being drawn exactly where it was before, no need to throttle
+                if (Math.abs(lastDrawX - x) > 1 || Math.abs(lastDrawY - y) > 1) {
+                    Thread.yield(); // Just yield instead of skip to avoid flickering
+                }
+            }
+            lastTextureOpTime = currentTime;
+            lastDrawX = x;
+            lastDrawY = y;
+
+            // Calculate visible portion with integer precision
+            int visibleX = Math.max((int)x, (int)clipX);
+            int visibleY = Math.max((int)y, (int)clipY);
+            int visibleWidth = (int)Math.min(x + width, clipX + clipWidth) - visibleX;
+            int visibleHeight = (int)Math.min(y + height, clipY + clipHeight) - visibleY;
+
+            // Ensure we don't try to draw zero or negative dimensions
+            if (visibleWidth <= 0 || visibleHeight <= 0) {
+                return;
+            }
+
+            // Calculate UV coordinates for the visible portion
+            float u1 = (visibleX - x) / width;
+            float v1 = (visibleY - y) / height;
+            float u2 = u1 + (visibleWidth / width);
+            float v2 = v1 + (visibleHeight / height);
 
             // Setup texture filtering parameters once and cache the result
             if (!textureSetupCache.containsKey(texture)) {
@@ -92,12 +83,9 @@ public class TextureManager {
                     (int)width,
                     (int)height
             );
-        } finally {
-            // Restore OpenGL state
-            if (!blendWasEnabled) {
-                RenderSystem.disableBlend();
-            }
-            GL11.glBindTexture(GL11.GL_TEXTURE_2D, previousTexture);
+        } catch (Exception e) {
+            System.out.println("Error in drawClippedTexture: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
@@ -153,6 +141,7 @@ public class TextureManager {
         } catch (Exception e) {
             // Gracefully handle missing textures
             textureSetupCache.put(texture, false);
+            System.out.println("Error setting up texture: " + e.getMessage());
         }
     }
 
@@ -168,7 +157,29 @@ public class TextureManager {
      */
     public static void drawTexture(DrawContext context, Identifier texture,
                                    float x, float y, float width, float height) {
-        drawClippedTexture(context, texture, x, y, width, height,
-                0, 0, Integer.MAX_VALUE, Integer.MAX_VALUE);
+        try {
+            // Setup texture filtering parameters once and cache the result
+            if (!textureSetupCache.containsKey(texture)) {
+                setupTextureFiltering(texture);
+            }
+
+            // Draw the texture
+            context.drawTexture(
+                    RenderLayer::getGuiTextured,
+                    texture,
+                    (int)x,
+                    (int)y,
+                    0,  // z offset
+                    0,  // u offset
+                    0,  // v offset
+                    (int)width,
+                    (int)height,
+                    (int)width,
+                    (int)height
+            );
+        } catch (Exception e) {
+            System.out.println("Error in drawTexture: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 }

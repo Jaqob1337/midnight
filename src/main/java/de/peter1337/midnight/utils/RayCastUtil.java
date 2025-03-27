@@ -16,6 +16,9 @@ import net.minecraft.util.shape.VoxelShape;
 import net.minecraft.world.RaycastContext;
 import net.minecraft.world.World;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -366,8 +369,8 @@ public class RayCastUtil {
             return Optional.empty();
         }
 
-        // Find all possible placement combinations
-        BlockPlacementInfo bestPlacement = null;
+        // Create a list to store all valid placements
+        List<BlockPlacementInfo> validPlacements = new ArrayList<>();
 
         // Check all surrounding blocks
         for (Direction dir : Direction.values()) {
@@ -395,66 +398,71 @@ public class RayCastUtil {
                     placeDir.getOffsetZ() * 0.5
             );
 
-            // Generate points to test on the face
-            // Center point and many points across the face for better placement chance
-            // More test points for better coverage
+            // Generate points to test - center plus offsets for better coverage
             double[] offsets = {0.0, 0.1, 0.25, 0.4, 0.45, 0.49};
-            for (double offsetX : offsets) {
-                for (double offsetY : offsets) {
-                    // Skip points that would be too far from center when in strict mode
-                    if (strictCenter && offsetX > 0.25 && offsetY > 0.25) {
-                        continue;
-                    }
 
-                    // Try each combination of offsets (positive and negative)
-                    for (int signX = -1; signX <= 1; signX += 2) {
-                        for (int signY = -1; signY <= 1; signY += 2) {
-                            if (offsetX == 0.0 && offsetY == 0.0) {
-                                // Only process the center point once
-                                if (signX == -1 && signY == -1) {
-                                    testPlacementPoint(
-                                            pos, placeAgainst, placeDir, faceCenter,
-                                            eyesPos, maxReach, strictCenter, 0, 0,
-                                            bestPlacement
-                                    );
-                                }
-                            } else if (offsetX == 0.0) {
-                                // Only process Y-axis points twice (positive and negative Y)
-                                if (signX == -1) {
-                                    testPlacementPoint(
-                                            pos, placeAgainst, placeDir, faceCenter,
-                                            eyesPos, maxReach, strictCenter, 0, offsetY * signY,
-                                            bestPlacement
-                                    );
-                                }
-                            } else if (offsetY == 0.0) {
-                                // Only process X-axis points twice (positive and negative X)
-                                if (signY == -1) {
-                                    testPlacementPoint(
-                                            pos, placeAgainst, placeDir, faceCenter,
-                                            eyesPos, maxReach, strictCenter, offsetX * signX, 0,
-                                            bestPlacement
-                                    );
-                                }
-                            } else {
-                                // Process all four corners
-                                testPlacementPoint(
-                                        pos, placeAgainst, placeDir, faceCenter,
-                                        eyesPos, maxReach, strictCenter, offsetX * signX, offsetY * signY,
-                                        bestPlacement
-                                );
-                            }
-                        }
-                    }
+            // Try center point first
+            tryPlacementPoint(pos, placeAgainst, placeDir, faceCenter,
+                    eyesPos, maxReach, validPlacements, 0, 0);
+
+            // Try horizontal and vertical axis points
+            for (double offset : offsets) {
+                if (offset == 0.0) continue; // Skip as we already tested center
+
+                // Horizontal offset points (X-axis equivalent)
+                tryPlacementPoint(pos, placeAgainst, placeDir, faceCenter,
+                        eyesPos, maxReach, validPlacements, offset, 0);
+                tryPlacementPoint(pos, placeAgainst, placeDir, faceCenter,
+                        eyesPos, maxReach, validPlacements, -offset, 0);
+
+                // Vertical offset points (Y-axis equivalent)
+                tryPlacementPoint(pos, placeAgainst, placeDir, faceCenter,
+                        eyesPos, maxReach, validPlacements, 0, offset);
+                tryPlacementPoint(pos, placeAgainst, placeDir, faceCenter,
+                        eyesPos, maxReach, validPlacements, 0, -offset);
+
+                // Diagonal points at various offsets
+                for (double secondOffset : offsets) {
+                    if (secondOffset == 0.0) continue;
+
+                    tryPlacementPoint(pos, placeAgainst, placeDir, faceCenter,
+                            eyesPos, maxReach, validPlacements, offset, secondOffset);
+                    tryPlacementPoint(pos, placeAgainst, placeDir, faceCenter,
+                            eyesPos, maxReach, validPlacements, -offset, secondOffset);
+                    tryPlacementPoint(pos, placeAgainst, placeDir, faceCenter,
+                            eyesPos, maxReach, validPlacements, offset, -secondOffset);
+                    tryPlacementPoint(pos, placeAgainst, placeDir, faceCenter,
+                            eyesPos, maxReach, validPlacements, -offset, -secondOffset);
                 }
             }
         }
 
-        return Optional.ofNullable(bestPlacement);
+        // If we found valid placements, sort and return the best one
+        if (!validPlacements.isEmpty()) {
+            // Sort placements based on criteria - center distance and eyes distance
+            Comparator<BlockPlacementInfo> comparator;
+
+            if (strictCenter) {
+                // In strict mode, prioritize center hits more
+                comparator = Comparator
+                        .comparingDouble(BlockPlacementInfo::getDistFromCenter)
+                        .thenComparingDouble(BlockPlacementInfo::getEyesDistance);
+            } else {
+                // In normal mode, balance between center and distance
+                comparator = Comparator.comparingDouble(p ->
+                        p.getDistFromCenter() * 0.4 + p.getEyesDistance() * 0.6);
+            }
+
+            return Optional.of(validPlacements.stream()
+                    .min(comparator)
+                    .orElse(validPlacements.get(0)));
+        }
+
+        return Optional.empty();
     }
 
     /**
-     * Tests a specific point on a block face for placement and updates the best placement if better
+     * Tests a specific point on a block face for placement and adds it to valid placements if successful
      *
      * @param pos Target block position
      * @param placeAgainst Position of block to place against
@@ -462,16 +470,14 @@ public class RayCastUtil {
      * @param faceCenter Center point of the face
      * @param eyesPos Player's eye position
      * @param maxReach Maximum reach distance
-     * @param strictCenter Whether to prioritize center hits
+     * @param validPlacements List to add successful placements to
      * @param offsetX X offset from center
      * @param offsetY Y offset from center
-     * @param bestPlacementRef Reference to current best placement (will be updated if better found)
-     * @return true if a valid placement was found and is better than current best
      */
-    private static boolean testPlacementPoint(
+    private static void tryPlacementPoint(
             BlockPos pos, BlockPos placeAgainst, Direction placeDir, Vec3d faceCenter,
-            Vec3d eyesPos, double maxReach, boolean strictCenter,
-            double offsetX, double offsetY, BlockPlacementInfo bestPlacementRef) {
+            Vec3d eyesPos, double maxReach, List<BlockPlacementInfo> validPlacements,
+            double offsetX, double offsetY) {
 
         // Calculate the actual hit vector with offsets
         Vec3d hitVec = getOffsetPoint(faceCenter, placeDir, offsetX, offsetY);
@@ -479,13 +485,13 @@ public class RayCastUtil {
         // Check distance from eyes to hit point
         double dist = eyesPos.distanceTo(hitVec);
         if (dist > maxReach) {
-            return false;
+            return;
         }
 
         // Check line of sight
         boolean canSee = canSeeBlockFace(eyesPos, hitVec, placeAgainst, placeDir);
         if (!canSee) {
-            return false;
+            return;
         }
 
         // Calculate rotations needed to look at this hit point
@@ -494,16 +500,12 @@ public class RayCastUtil {
         // How centered is the hit? (distance from face center)
         double centerDist = hitVec.distanceTo(faceCenter);
 
-        // Check if this is better than what we already found
-        if (bestPlacementRef == null || isBetterPlacement(centerDist, dist, bestPlacementRef, strictCenter)) {
-            BlockPlacementInfo newPlacement = new BlockPlacementInfo(
-                    pos, placeAgainst, placeDir, hitVec, rotations, centerDist, dist
-            );
-            bestPlacementRef = newPlacement;
-            return true;
-        }
+        // Create and add a new valid placement
+        BlockPlacementInfo placement = new BlockPlacementInfo(
+                pos, placeAgainst, placeDir, hitVec, rotations, centerDist, dist
+        );
 
-        return false;
+        validPlacements.add(placement);
     }
 
     /**
@@ -560,28 +562,6 @@ public class RayCastUtil {
         return faceCenter.add(
                 xVec.multiply(offsetX).add(yVec.multiply(offsetY))
         );
-    }
-
-    /**
-     * Decides if a new placement is better than the current best one
-     */
-    private static boolean isBetterPlacement(double newCenterDist, double newDist,
-                                             BlockPlacementInfo currentBest, boolean strictCenter) {
-        if (strictCenter) {
-            // In strict mode, greatly prefer more centered hits
-            if (newCenterDist < currentBest.getDistFromCenter() * 0.7) {
-                return true;
-            } else if (newCenterDist > currentBest.getDistFromCenter() * 1.3) {
-                return false;
-            }
-            // If center distances are similar, prefer closer placements
-            return newDist < currentBest.getEyesDistance();
-        } else {
-            // In non-strict mode, balance between center distance and eye distance
-            double newScore = newDist * 0.6 + newCenterDist * 0.4;
-            double currentScore = currentBest.getEyesDistance() * 0.6 + currentBest.getDistFromCenter() * 0.4;
-            return newScore < currentScore;
-        }
     }
 
     /**
