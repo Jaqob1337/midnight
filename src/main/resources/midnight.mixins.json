@@ -19,7 +19,9 @@
 		"TitleScreenMixin",
 		"NoSlowMixin",
 		"ToastMixin",
-		"VelocityMixin"
+		"VelocityMixin",
+		"MovementFixMixin",
+		"EntityAccessor"
 	],
 	"injectors": {
 		"defaultRequire": 1

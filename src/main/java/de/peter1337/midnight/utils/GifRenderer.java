@@ -93,13 +93,10 @@ public class GifRenderer {
      * @throws IOException If there's an error loading the GIF
      */
     public static void loadGif(String resourcePath, String identifier, float width, float height) throws IOException {
-        System.out.println("Loading GIF: " + resourcePath + " with ID: " + identifier);
-
         // Check if already loaded
         if (loadedGifs.containsKey(identifier)) {
             // Update dimensions if needed
             loadedGifs.get(identifier).setDimensions(width, height);
-            System.out.println("GIF already loaded, updated dimensions to: " + width + "x" + height);
             return;
         }
 
@@ -107,11 +104,8 @@ public class GifRenderer {
         InputStream is = MinecraftClient.class.getResourceAsStream("/assets/midnight/" + resourcePath);
 
         if (is == null) {
-            System.out.println("GIF resource not found: " + resourcePath);
             throw new IOException("Could not find GIF resource: " + resourcePath);
         }
-
-        System.out.println("Found GIF resource, starting to process frames");
 
         // Create a new GifData instance
         GifData gifData = new GifData(width, height);
@@ -126,19 +120,15 @@ public class GifRenderer {
 
             // Get the number of frames
             int numFrames = reader.getNumImages(true);
-            System.out.println("GIF has " + numFrames + " frames");
 
             // Process each frame
             for (int i = 0; i < numFrames; i++) {
-                System.out.println("Processing frame " + (i+1) + "/" + numFrames);
-
                 // Read the frame image
                 BufferedImage frame = reader.read(i);
 
                 // Get the frame delay from metadata
                 IIOMetadata metadata = reader.getImageMetadata(i);
                 int delay = getFrameDelay(metadata);
-                System.out.println("Frame " + i + " has delay: " + delay + "ms");
 
                 // Convert BufferedImage to NativeImage and create texture
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -149,12 +139,10 @@ public class GifRenderer {
 
                 // Create a unique identifier for this frame
                 Identifier frameId = Identifier.of("midnight", "gif/" + identifier + "/frame" + i);
-                System.out.println("Created identifier for frame: " + frameId);
 
                 // Register the texture and store frame data
                 NativeImageBackedTexture texture = new NativeImageBackedTexture(nativeImage);
                 client.getTextureManager().registerTexture(frameId, texture);
-                System.out.println("Registered texture for frame " + i);
 
                 // Add the frame to our GIF data
                 gifData.frames.add(new GifFrame(frameId, delay));
@@ -162,11 +150,8 @@ public class GifRenderer {
 
             // Store the loaded GIF
             loadedGifs.put(identifier, gifData);
-            System.out.println("Successfully loaded GIF with " + gifData.frames.size() + " frames");
 
         } catch (Exception e) {
-            System.out.println("Error loading GIF: " + e.getMessage());
-            e.printStackTrace();
             throw new IOException("Error loading GIF: " + e.getMessage(), e);
         } finally {
             is.close();
@@ -215,76 +200,39 @@ public class GifRenderer {
 
     /**
      * Renders a loaded GIF at the specified position
+     *
+     * @param context    The DrawContext for rendering
+     * @param identifier The identifier used when loading the GIF
+     * @param x1
+     * @param v
+     * @param x          The x position to render at
+     * @param y          The y position to render at
+     * @param clipX      The clip region x position (0 for no clipping)
+     * @param clipY      The clip region y position (0 for no clipping)
+     * @param clipWidth  The clip region width (Integer.MAX_VALUE for no clipping)
+     * @param clipHeight The clip region height (Integer.MAX_VALUE for no clipping)
+     * @return True if the GIF was rendered, false if not found
      */
     public static boolean renderGif(DrawContext context, String identifier,
-                                    float x, float y,
-                                    float clipX, float clipY,
-                                    float clipWidth, float clipHeight,
-                                    boolean ignoreClipping) {
-        GifData gifData = loadedGifs.get(identifier);
-        if (gifData == null) {
-            System.out.println("GIF not found: " + identifier);
-            return false;
-        }
-
-        GifFrame currentFrame = gifData.getCurrentFrame();
-        if (currentFrame == null) {
-            System.out.println("No frames available for GIF: " + identifier);
-            return false;
-        }
-
-        System.out.println("Rendering GIF frame with ID: " + currentFrame.textureId);
-        System.out.println("Position: x=" + x + ", y=" + y);
-        System.out.println("Dimensions: w=" + gifData.targetWidth + ", h=" + gifData.targetHeight);
-
-        try {
-            // No direct OpenGL calls - use safer methods
-            if (ignoreClipping) {
-                // Save current transform
-                context.getMatrices().push();
-
-                // Move forward in Z to render on top of other elements
-                context.getMatrices().translate(0, 0, 100);
-
-                // Draw without clipping using TextureManager for compatibility
-                de.peter1337.midnight.manager.TextureManager.drawTexture(
-                        context,
-                        currentFrame.textureId,
-                        x, y,
-                        gifData.targetWidth,
-                        gifData.targetHeight
-                );
-
-                // Restore transform
-                context.getMatrices().pop();
-            } else {
-                // Use clipped texture drawing
-                de.peter1337.midnight.manager.TextureManager.drawClippedTexture(
-                        context,
-                        currentFrame.textureId,
-                        x, y,
-                        gifData.targetWidth, gifData.targetHeight,
-                        clipX, clipY, clipWidth, clipHeight
-                );
-            }
-
-            System.out.println("Successfully rendered GIF frame");
-            return true;
-        } catch (Exception e) {
-            System.out.println("Error rendering GIF frame: " + e.getMessage());
-            e.printStackTrace();
-            return false;
-        }
-    }
-
-    /**
-     * Overloaded version that defaults to using clipping
-     */
-    public static boolean renderGif(DrawContext context, String identifier,
-                                    float x, float y,
+                                    float x1, float v, float x, float y,
                                     float clipX, float clipY,
                                     float clipWidth, float clipHeight) {
-        return renderGif(context, identifier, x, y, clipX, clipY, clipWidth, clipHeight, false);
+        GifData gifData = loadedGifs.get(identifier);
+        if (gifData == null) return false;
+
+        GifFrame currentFrame = gifData.getCurrentFrame();
+        if (currentFrame == null) return false;
+
+        // Render the current frame
+        de.peter1337.midnight.manager.TextureManager.drawTexture(
+                context,
+                currentFrame.textureId,
+                x, y,
+                gifData.targetWidth, gifData.targetHeight,
+                clipX, clipY, clipWidth, clipHeight
+        );
+
+        return true;
     }
 
     /**

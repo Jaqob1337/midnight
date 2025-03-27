@@ -4,7 +4,6 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.util.Identifier;
 import net.minecraft.client.render.RenderLayer;
-import com.mojang.blaze3d.systems.RenderSystem;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL30;
 import org.lwjgl.opengl.EXTTextureFilterAnisotropic;
@@ -155,31 +154,27 @@ public class TextureManager {
     /**
      * Draws a texture at the specified position without clipping
      */
-    public static void drawTexture(DrawContext context, Identifier texture,
-                                   float x, float y, float width, float height) {
-        try {
-            // Setup texture filtering parameters once and cache the result
-            if (!textureSetupCache.containsKey(texture)) {
-                setupTextureFiltering(texture);
-            }
 
-            // Draw the texture
-            context.drawTexture(
-                    RenderLayer::getGuiTextured,
-                    texture,
-                    (int)x,
-                    (int)y,
-                    0,  // z offset
-                    0,  // u offset
-                    0,  // v offset
-                    (int)width,
-                    (int)height,
-                    (int)width,
-                    (int)height
-            );
-        } catch (Exception e) {
-            System.out.println("Error in drawTexture: " + e.getMessage());
-            e.printStackTrace();
-        }
+/**
+ * Draws a texture at the specified position without clipping
+ * This is a simpler alternative to using DrawContext.drawTexture directly
+ */
+            public static void drawTexture(DrawContext context, Identifier texture,
+                                           float x1, float y1, float width1, float v, float x, float y, float width, float height) {
+                // Use the layer method in older Minecraft versions which is more compatible
+                context.drawTexture(
+                        RenderLayer::getGuiTextured,
+                        texture,
+                        (int)x,
+                        (int)y,
+                        0, // zOffset
+                        0, // uOffset
+                        0, // vOffset
+                        (int)width,
+                        (int)height,
+                        (int)width,
+                        (int)height
+                );
+
     }
 }
