@@ -116,6 +116,7 @@ public class RayCastUtil {
 
     /**
      * Finds the closest visible point on an entity's hitbox by testing multiple points.
+     * Improved for close-range targeting and critical points.
      *
      * @param entity The target entity.
      * @return The closest visible Vec3d point on the entity's hitbox, or null if none are visible.
@@ -133,6 +134,12 @@ public class RayCastUtil {
         pointsToCheck.add(entityEyePos); // Entity eyes
         pointsToCheck.add(box.getCenter());    // Center of bounding box
 
+        // Add middle body point (better for sword hits)
+        pointsToCheck.add(new Vec3d(box.getCenter().x, box.minY + (box.maxY - box.minY) * 0.5, box.getCenter().z));
+
+        // Add upper chest point (good for sword critical hits)
+        pointsToCheck.add(new Vec3d(box.getCenter().x, box.minY + (box.maxY - box.minY) * 0.8, box.getCenter().z));
+
         // Add corners
         pointsToCheck.add(new Vec3d(box.minX, box.minY, box.minZ));
         pointsToCheck.add(new Vec3d(box.maxX, box.minY, box.minZ));
@@ -143,21 +150,37 @@ public class RayCastUtil {
         pointsToCheck.add(new Vec3d(box.maxX, box.minY, box.maxZ));
         pointsToCheck.add(new Vec3d(box.maxX, box.maxY, box.maxZ));
 
-        // Add face centers (optional, adds more checks)
-        pointsToCheck.add(new Vec3d(box.getCenter().x, box.minY, box.getCenter().z)); // Bottom center
-        pointsToCheck.add(new Vec3d(box.getCenter().x, box.maxY, box.getCenter().z)); // Top center
-        pointsToCheck.add(new Vec3d(box.minX, box.getCenter().y, box.getCenter().z)); // -X center
-        pointsToCheck.add(new Vec3d(box.maxX, box.getCenter().y, box.getCenter().z)); // +X center
-        pointsToCheck.add(new Vec3d(box.getCenter().x, box.getCenter().y, box.minZ)); // -Z center
-        pointsToCheck.add(new Vec3d(box.getCenter().x, box.getCenter().y, box.maxZ)); // +Z center
+        // Add more hitbox test points
+        float interval = 0.4f;
+        for (float y = 0.2f; y <= 0.8; y += interval) {
+            // Add horizontal ring of points at this height
+            pointsToCheck.add(new Vec3d(box.minX, box.minY + (box.maxY - box.minY) * y, box.getCenter().z));
+            pointsToCheck.add(new Vec3d(box.maxX, box.minY + (box.maxY - box.minY) * y, box.getCenter().z));
+            pointsToCheck.add(new Vec3d(box.getCenter().x, box.minY + (box.maxY - box.minY) * y, box.minZ));
+            pointsToCheck.add(new Vec3d(box.getCenter().x, box.minY + (box.maxY - box.minY) * y, box.maxZ));
+        }
 
+        // Check if we're very close to the entity
+        boolean isClose = mc.player.squaredDistanceTo(entity) < 3.0;
 
         Vec3d bestPoint = null;
         double bestDistSq = Double.MAX_VALUE;
 
         for (Vec3d point : pointsToCheck) {
-            if (canSeePosition(point)) { // Use the corrected canSeePosition
+            if (canSeePosition(point)) {
                 double distSq = eyePos.squaredDistanceTo(point);
+
+                // For close combat, prefer points requiring less head movement
+                if (isClose) {
+                    Vec3d lookVec = mc.player.getRotationVec(1.0f);
+                    Vec3d toPoint = point.subtract(eyePos).normalize();
+                    double dotProduct = lookVec.dotProduct(toPoint);
+
+                    // Adjust distance by how much rotation would be needed
+                    // Higher dot product = less rotation needed
+                    distSq = distSq * (2.0 - dotProduct);
+                }
+
                 if (distSq < bestDistSq) {
                     bestDistSq = distSq;
                     bestPoint = point;
@@ -165,9 +188,15 @@ public class RayCastUtil {
             }
         }
 
-        // Optimization: If entity eyes are visible, maybe just return that immediately?
-        // if (canSeePosition(entityEyePos)) return entityEyePos;
-        // Then proceed to check others if eyes aren't visible.
+        // Special handling for very close combat
+        if (bestPoint == null && isClose) {
+            // If no visible points found and entity is very close,
+            // try entity center with a slight y-offset as a last resort
+            Vec3d centerFallback = box.getCenter().add(0, -0.2, 0);
+            if (canSeePosition(centerFallback)) {
+                return centerFallback;
+            }
+        }
 
         return bestPoint; // Returns null if no points were visible
     }

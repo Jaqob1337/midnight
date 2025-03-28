@@ -50,8 +50,8 @@ public class RotationHandler {
     private static final int ROTATION_BREAK_THRESHOLD = 15; // Number of rotations before introducing variation
 
     // NCP direction-specific avoidance
-    private static final float MAX_YAW_CHANGE = 40f;     // Maximum degrees of yaw change per tick
-    private static final float MAX_PITCH_CHANGE = 30f;   // Maximum degrees of pitch change per tick
+    private static final float MAX_YAW_CHANGE = 80f;     // Maximum degrees of yaw change per tick
+    private static final float MAX_PITCH_CHANGE = 60f;   // Maximum degrees of pitch change per tick
 
     /**
      * Initializes the rotation handler. Should be called during client setup.
@@ -345,14 +345,23 @@ public class RotationHandler {
         // Calculate distance in XZ plane
         double dist = Math.sqrt(diffX * diffX + diffZ * diffZ);
 
-        // Calculate yaw and pitch
-        float yaw = (float) Math.toDegrees(Math.atan2(diffZ, diffX)) - 90f;
-        float pitch = (float) -Math.toDegrees(Math.atan2(diffY, dist));
+        // Improved pitch calculation with special handling for very close targets
+        float pitch;
+        if (dist < 0.1) {
+            // When almost directly above/below, use direct Y difference
+            // and limit to a reasonable angle to prevent extreme pitch
+            if (diffY > 0) {
+                pitch = 80f; // Looking down
+            } else {
+                pitch = -80f; // Looking up
+            }
+        } else {
+            // Normal pitch calculation
+            pitch = (float) -Math.toDegrees(Math.atan2(diffY, dist));
+        }
 
-        // Randomize slightly for more human-like targeting
-        float accuracy = 0.25f;  // Lower value means more accurate
-        yaw += (random.nextFloat() - 0.5f) * accuracy;
-        pitch += (random.nextFloat() - 0.5f) * accuracy;
+        // Calculate yaw
+        float yaw = (float) Math.toDegrees(Math.atan2(diffZ, diffX)) - 90f;
 
         // Normalize angles
         yaw = MathHelper.wrapDegrees(yaw);

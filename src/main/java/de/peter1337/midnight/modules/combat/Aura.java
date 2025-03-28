@@ -73,7 +73,7 @@ public class Aura extends Module {
     );
 
     private final Setting<Float> rotationSpeed = register(
-            new Setting<>("RotationSpeed", 0.4f, 0.0f, 1.0f, "Speed of rotation to targets (0 = smooth, 1 = instant)")
+            new Setting<>("RotationSpeed", 0.4f, 0.0f, 2.0f, "Speed of rotation to targets (0 = smooth, 1 = instant)")
     );
 
     private final Setting<Boolean> useMoveFixSetting = register( // New MoveFix Toggle
@@ -452,44 +452,86 @@ public class Aura extends Module {
         return playerEyePos.squaredDistanceTo(closestX, closestY, closestZ) <= rangeSq;
     }
 
-    /** Handles rotations to the primary target using RotationHandler. */
+    /**
+     * Handles rotations to the primary target using RotationHandler.
+     */
     private void handleRotations() {
-        if (primaryTarget == null || targetPoint == null || mc.player == null) return;
+        if (mc.player == null || targetPoint == null || primaryTarget == null) return;
 
-        float[] targetRotations = RotationHandler.calculateLookAt(targetPoint);
-        boolean silent, bodyOnly, useMoveFix;
-        boolean moveFixEnabledByUser = useMoveFixSetting.getValue(); // Get user setting
+        // Calculate base rotations to target
+        float[] baseRotations;
+
+        // For very close targets, use a different targeting approach
+        if (mc.player.squaredDistanceTo(primaryTarget) < 3.0) { // If within ~1.7 blocks
+            // Get target's eye height to avoid aiming too high
+            float targetEyeHeight = primaryTarget.getEyeHeight(primaryTarget.getPose());
+            Vec3d closeTargetPos = primaryTarget.getPos().add(0, targetEyeHeight * 0.85, 0);
+
+            // Calculate more accurate rotations for close combat
+            baseRotations = RotationHandler.calculateLookAt(closeTargetPos);
+
+            // For close targets, limit the pitch to avoid looking too far up/down
+            baseRotations[1] = MathHelper.clamp(baseRotations[1], -45f, 60f);
+        } else {
+            // Normal targeting for regular distances
+            baseRotations = RotationHandler.calculateLookAt(targetPoint);
+        }
+
+        // Determine rotation mode parameters
+        boolean silent;
+        boolean bodyOnly;
+        boolean moveFixRequired;
 
         switch (rotationMode.getValue()) {
             case "Silent":
-                silent = true; bodyOnly = false; useMoveFix = moveFixEnabledByUser;
+                silent = true;
+                bodyOnly = false;
                 break;
             case "Client":
-                silent = false; bodyOnly = false; useMoveFix = false; // Client mode never needs move fix
+                silent = false;
+                bodyOnly = false;
                 break;
             case "Body":
-                silent = true; bodyOnly = true; useMoveFix = moveFixEnabledByUser;
+                // For Body mode, rotations are sent to server but also applied to model
+                silent = true; // Still "silent" from camera perspective
+                bodyOnly = true; // Apply to body model
                 break;
-            default: // Default to silent
-                silent = true; bodyOnly = false; useMoveFix = moveFixEnabledByUser;
+            default:
+                silent = true;
+                bodyOnly = false;
                 break;
         }
 
-        float speedFactor = rotationSpeed.getValue();
+        moveFixRequired = (silent || bodyOnly) && useMoveFixSetting.getValue();
 
-        if (speedFactor >= 0.99f) { // Instant Rotation
-            RotationHandler.requestRotation(targetRotations[0], targetRotations[1], ROTATION_PRIORITY, 50, silent, bodyOnly, useMoveFix, state -> rotating = true);
-        } else { // Smoothed Rotation Step
-            float currentYaw = (silent || bodyOnly) ? RotationHandler.getServerYaw() : mc.player.getYaw();
-            float currentPitch = (silent || bodyOnly) ? RotationHandler.getServerPitch() : mc.player.getPitch();
-            float interpSpeed = 0.1f + (speedFactor * 0.9f);
-            float yawDiff = MathHelper.wrapDegrees(targetRotations[0] - currentYaw);
-            float pitchDiff = targetRotations[1] - currentPitch;
-            float stepYaw = currentYaw + yawDiff * interpSpeed;
-            float stepPitch = MathHelper.clamp(currentPitch + pitchDiff * interpSpeed, -90f, 90f);
-            RotationHandler.requestRotation(stepYaw, stepPitch, ROTATION_PRIORITY, 30, silent, bodyOnly, useMoveFix, state -> rotating = true);
-        }
+        float currentYaw = (silent || bodyOnly) ? RotationHandler.getServerYaw() : mc.player.getYaw();
+        float currentPitch = (silent || bodyOnly) ? RotationHandler.getServerPitch() : mc.player.getPitch();
+
+        float speed = rotationSpeed.getValue();
+
+        // Apply smooth rotation with the current speed setting
+        float[] smoothedRotations = RotationHandler.smoothRotation(
+                currentYaw,
+                currentPitch,
+                baseRotations[0],
+                baseRotations[1],
+                speed
+        );
+
+        // Request the rotation step with correct parameters
+        RotationHandler.requestRotation(
+                smoothedRotations[0],
+                smoothedRotations[1],
+                ROTATION_PRIORITY,
+                60, // Duration slightly longer than a tick
+                silent,
+                bodyOnly,
+                moveFixRequired,
+                null
+        );
+        rotating = true;
     }
+
 
     /** Attacks the target entity */
     private void attack(Entity target) {
