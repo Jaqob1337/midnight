@@ -34,6 +34,11 @@ public class Scaffold extends Module {
     private static final int ROTATION_PRIORITY = 80;
     private boolean rotationsSet = false;
 
+    // Walking direction tracking
+    private Direction bridgeDirection = null;
+    private float targetYaw = 0;
+    private float targetPitch = 70f; // Default looking down angle for bridging
+
     // Simple timer for block placement
     private long lastPlaceTime = 0;
 
@@ -44,13 +49,13 @@ public class Scaffold extends Module {
 
     private final Setting<String> rotationMode = register(
             new Setting<>("RotationMode", "Silent",
-                    Arrays.asList("Silent", "Client"),
-                    "Silent: server-only, Client: visible")
+                    Arrays.asList("Silent", "Client", "Body"),
+                    "Silent: server-only, Client: visible, Body: shows on body only")
                     .dependsOn(rotations)
     );
 
     private final Setting<Boolean> moveFix = register(
-            new Setting<>("MoveFix", Boolean.TRUE, "Corrects movement direction during silent rotations")
+            new Setting<>("MoveFix", Boolean.TRUE, "Corrects rotation and movement direction during scaffolding (always reverses movement)")
                     .dependsOn(rotations)
     );
 
@@ -86,6 +91,15 @@ public class Scaffold extends Module {
     public void onEnable() {
         lastPlacedPos = null;
         rotationsSet = false;
+
+        // Initialize bridge direction based on player's current yaw
+        if (mc.player != null) {
+            bridgeDirection = getHorizontalDirection(mc.player.getYaw());
+            targetYaw = getYawFromDirection(bridgeDirection.getOpposite());
+
+            // Apply initial backward rotation
+            applyBackwardRotation();
+        }
     }
 
     @Override
@@ -105,25 +119,42 @@ public class Scaffold extends Module {
         // Handle safe walk (sneaking at edges)
         handleSafeWalk();
 
-        // Find the placement position and direction
+        // Always apply backward rotation - this happens regardless of whether a block is being placed
+        applyBackwardRotation();
+
+        // Try to find a placement position
         PlacementInfo placement = findPlacement();
-        if (placement == null) return;
-
-        // Handle rotations if enabled
-        if (rotations.getValue()) {
-            float[] angles = calculateRotation(placement.hitVec);
-            handleRotations(angles[0], angles[1]);
-        }
-
-        // Check if we can place a block now
-        if (canPlaceNow() && hasBlocks()) {
-            // Perform the placement
-            placeBlock(placement);
-
-            // Handle tower jumping
-            if (tower.getValue() && mc.options.jumpKey.isPressed() && mc.player.isOnGround()) {
-                mc.player.jump();
+        if (placement != null) {
+            // Optionally update bridge direction based on placement
+            Direction newDirection = getBridgeDirectionFromPlacement(placement);
+            if (newDirection != null) {
+                bridgeDirection = newDirection;
+                targetYaw = getYawFromDirection(bridgeDirection.getOpposite());
             }
+
+            // Apply rotation for block placement
+            if (rotations.getValue()) {
+                float[] placeAngles = calculateRotation(placement.hitVec);
+                targetPitch = placeAngles[1]; // Use calculated pitch for placement
+
+                // Apply rotations with looking down for placement but backward for movement
+                handleRotations(targetYaw, targetPitch);
+            }
+
+            // Check if we can place a block now
+            if (canPlaceNow() && hasBlocks()) {
+                // Perform the placement
+                placeBlock(placement);
+
+                // Handle tower jumping
+                if (tower.getValue() && mc.options.jumpKey.isPressed() && mc.player.isOnGround()) {
+                    mc.player.jump();
+                }
+            }
+        } else if (rotations.getValue()) {
+            // Even if no placement is needed, still apply backward rotation to ensure
+            // continuous movement correction while scaffolding
+            handleRotations(targetYaw, targetPitch);
         }
     }
 
@@ -133,6 +164,82 @@ public class Scaffold extends Module {
     @Override
     public void onUpdate() {
         // Most functionality is in preUpdate to handle rotations before movement
+    }
+
+    /**
+     * Applies backward rotation for natural bridging appearance
+     */
+    private void applyBackwardRotation() {
+        if (mc.player == null || !rotations.getValue()) return;
+
+        // If bridge direction isn't set yet, initialize it
+        if (bridgeDirection == null) {
+            bridgeDirection = getHorizontalDirection(mc.player.getYaw());
+            targetYaw = getYawFromDirection(bridgeDirection.getOpposite());
+        }
+
+        // Apply backward-facing rotations (opposite to bridge direction)
+        handleRotations(targetYaw, targetPitch);
+    }
+
+    /**
+     * Determines the bridge direction based on block placement
+     */
+    private Direction getBridgeDirectionFromPlacement(PlacementInfo placement) {
+        if (mc.player == null) return Direction.SOUTH;
+
+        // Extract placement direction vector
+        Vec3d placeVec = new Vec3d(
+                placement.targetPos.getX() - mc.player.getX(),
+                0,
+                placement.targetPos.getZ() - mc.player.getZ()
+        );
+
+        // If the vector is too small, use player's facing
+        if (placeVec.lengthSquared() < 0.01) {
+            return getHorizontalDirection(mc.player.getYaw());
+        }
+
+        // Normalize the vector
+        if (placeVec.lengthSquared() > 0) {
+            placeVec = placeVec.normalize();
+        }
+
+        // Convert vector to direction
+        if (Math.abs(placeVec.x) > Math.abs(placeVec.z)) {
+            return placeVec.x > 0 ? Direction.EAST : Direction.WEST;
+        } else {
+            return placeVec.z > 0 ? Direction.SOUTH : Direction.NORTH;
+        }
+    }
+
+    /**
+     * Gets a horizontal direction from a yaw angle
+     */
+    private Direction getHorizontalDirection(float yaw) {
+        yaw = MathHelper.wrapDegrees(yaw);
+        if (yaw >= -45 && yaw < 45) {
+            return Direction.SOUTH; // 0 degrees
+        } else if (yaw >= 45 && yaw < 135) {
+            return Direction.WEST; // 90 degrees
+        } else if (yaw >= 135 || yaw < -135) {
+            return Direction.NORTH; // 180 degrees
+        } else {
+            return Direction.EAST; // 270 degrees
+        }
+    }
+
+    /**
+     * Gets the yaw angle for a specific direction
+     */
+    private float getYawFromDirection(Direction dir) {
+        switch (dir) {
+            case SOUTH: return 0;
+            case WEST: return 90;
+            case NORTH: return 180;
+            case EAST: return -90;
+            default: return 0;
+        }
     }
 
     /**
@@ -307,12 +414,18 @@ public class Scaffold extends Module {
      */
     private void handleRotations(float yaw, float pitch) {
         boolean isSilent = rotationMode.getValue().equals("Silent");
-        boolean useMoveFix = isSilent && moveFix.getValue();
+        boolean isBody = rotationMode.getValue().equals("Body");
+        boolean useMoveFix = (isSilent || isBody) && moveFix.getValue();
 
         if (isSilent) {
             // Silent rotations - send to server but don't show on client
             RotationHandler.requestRotation(
                     yaw, pitch, ROTATION_PRIORITY, 100, true, false, useMoveFix, null
+            );
+        } else if (isBody) {
+            // Body rotations - send to server and show on player's body model
+            RotationHandler.requestRotation(
+                    yaw, pitch, ROTATION_PRIORITY, 100, true, true, useMoveFix, null
             );
         } else if (rotationMode.getValue().equals("Client")) {
             // Visible client rotations - no need for MoveFix
@@ -375,7 +488,7 @@ public class Scaffold extends Module {
      * Check if sprint is allowed (for integration with Sprint module)
      */
     public boolean isSprintAllowed() {
-        return false; // Sprint usually messes with bridging
+        return false; // Disable sprint while scaffolding for more legit movement
     }
 
     /**
