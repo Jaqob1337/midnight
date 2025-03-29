@@ -21,7 +21,8 @@
 		"ToastMixin",
 		"VelocityMixin",
 		"MovementFixMixin",
-		"EntityAccessor"
+		"EntityAccessor",
+		"ScaffoldSafeWalkMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

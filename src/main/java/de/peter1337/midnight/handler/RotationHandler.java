@@ -10,17 +10,19 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.Random;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.Map;
 
 /**
- * Manages rotations for modules that need to control player's yaw and pitch.
+ * Enhanced RotationHandler - Manages player rotations with improved smoothing and speed
  * Supports both client-side visible rotations and server-side silent rotations.
  */
 public class RotationHandler {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
     private static final Random random = new Random();
 
-    // Rotation priority system - higher priority will override lower ones
-    private static final List<RotationRequest> activeRequests = new ArrayList<>();
+    // Thread-safe storage for active rotation requests
+    private static final Map<Integer, RotationRequest> activeRequests = new ConcurrentHashMap<>();
 
     // Last sent rotation to the server
     private static float serverYaw = 0f;
@@ -30,34 +32,38 @@ public class RotationHandler {
     private static float prevClientYaw = 0f;
     private static float prevClientPitch = 0f;
 
-    // Current status flags
+    // Status flags
     private static boolean rotatingClient = false;
     private static boolean rotationInProgress = false;
     private static boolean bodyRotation = false;
     private static boolean moveFixEnabled = false;
     private static boolean usingMoveFix = false;
 
-    // GCD and randomization settings
-    private static final float GCD_MULTIPLIER = 0.1499f; // Slightly less than Minecraft's GCD value
-    private static final float YAW_RANDOMIZATION = 0.2f;  // Small randomization for yaw
-    private static final float PITCH_RANDOMIZATION = 0.1f; // Smaller randomization for pitch
+    // Smooth rotation parameters
+    private static final float MIN_ROTATION_SPEED = 0.1f;
+    private static final float QUICK_ROTATION_THRESHOLD = 0.9f;
+    private static final float MAX_INSTANT_YAW_CHANGE = 180f;  // Increased max change for faster rotations
+    private static final float MAX_INSTANT_PITCH_CHANGE = 90f;
+    private static final float MAX_SMOOTH_YAW_CHANGE = 20f;    // More reasonable value for smooth turns
+    private static final float MAX_SMOOTH_PITCH_CHANGE = 15f;
 
-    // Anti-pattern settings
+    // Human-like settings
+    private static final float GCD_BASE = 0.14f;       // GCD value that makes rotations appear human-like
+    private static final float YAW_RANDOMIZATION = 0.15f;  // Small randomization for yaw
+    private static final float PITCH_RANDOMIZATION = 0.08f; // Smaller randomization for pitch
+
+    // Rotation timing
     private static int rotationCounter = 0;
     private static float lastYawChange = 0f;
     private static float lastPitchChange = 0f;
     private static long lastRotationTime = 0L;
-    private static final int ROTATION_BREAK_THRESHOLD = 15; // Number of rotations before introducing variation
-
-    // NCP direction-specific avoidance
-    private static final float MAX_YAW_CHANGE = 80f;     // Maximum degrees of yaw change per tick
-    private static final float MAX_PITCH_CHANGE = 60f;   // Maximum degrees of pitch change per tick
+    private static final int ROTATION_BREAK_THRESHOLD = 20; // Number of rotations before introducing variation
 
     /**
-     * Initializes the rotation handler. Should be called during client setup.
+     * Initializes the rotation handler.
      */
     public static void init() {
-        Midnight.LOGGER.info("RotationHandler initialized");
+        Midnight.LOGGER.info("Enhanced RotationHandler initialized");
         // Initial values based on player rotations
         if (mc.player != null) {
             serverYaw = mc.player.getYaw();
@@ -106,18 +112,23 @@ public class RotationHandler {
      * Process rotation requests based on priority
      */
     private static void processRotations() {
-        // Clean up expired rotations
-        activeRequests.removeIf(request -> System.currentTimeMillis() >= request.expirationTime);
+        // Remove expired rotations
+        long currentTime = System.currentTimeMillis();
+        activeRequests.entrySet().removeIf(entry -> currentTime >= entry.getValue().expirationTime);
 
         // Find the highest priority active rotation
-        if (!activeRequests.isEmpty()) {
-            RotationRequest highestPriority = activeRequests.stream()
-                    .max((r1, r2) -> Integer.compare(r1.priority, r2.priority))
-                    .orElse(null);
+        RotationRequest highestPriority = null;
+        int highestPriorityValue = Integer.MIN_VALUE;
 
-            if (highestPriority != null) {
-                applyRotation(highestPriority);
+        for (RotationRequest request : activeRequests.values()) {
+            if (request.priority > highestPriorityValue) {
+                highestPriorityValue = request.priority;
+                highestPriority = request;
             }
+        }
+
+        if (highestPriority != null) {
+            applyRotation(highestPriority);
         } else {
             rotationInProgress = false;
             moveFixEnabled = false;
@@ -126,20 +137,42 @@ public class RotationHandler {
     }
 
     /**
-     * Apply a rotation request with improved anti-detection
+     * Apply a rotation request with improved smooth transitions
      */
     private static void applyRotation(RotationRequest request) {
         // Track that we're in a rotation currently
         rotationInProgress = true;
         moveFixEnabled = request.moveFix;
 
-        // Calculate NCP-friendly rotation values
-        float[] safeRotation = getSafeRotation(
-                request.silent ? serverYaw : mc.player.getYaw(),
-                request.silent ? serverPitch : mc.player.getPitch(),
-                request.yaw,
-                request.pitch
-        );
+        // Get current rotations to work with
+        float currentYaw = request.silent ? serverYaw : mc.player.getYaw();
+        float currentPitch = request.silent ? serverPitch : mc.player.getPitch();
+
+        // Calculate goal rotations with GCD and human-like patterns
+        float targetYaw = request.yaw;
+        float targetPitch = request.pitch;
+
+        // Determine the speed factor based on how quick we want this rotation
+        float effectiveSpeed = Math.max(MIN_ROTATION_SPEED, request.speed);
+
+        // Calculate rotation based on speed setting
+        float[] newRotations;
+
+        if (effectiveSpeed >= QUICK_ROTATION_THRESHOLD) {
+            // Fast, almost instant rotation
+            newRotations = calculateInstantRotation(currentYaw, currentPitch, targetYaw, targetPitch);
+        } else {
+            // Smooth rotation with speed scaling
+            newRotations = calculateSmoothRotation(currentYaw, currentPitch, targetYaw, targetPitch, effectiveSpeed);
+        }
+
+        // Apply human randomization
+        newRotations[0] += (random.nextFloat() - 0.5f) * YAW_RANDOMIZATION * Math.max(0.2f, 1.0f - effectiveSpeed);
+        newRotations[1] += (random.nextFloat() - 0.5f) * PITCH_RANDOMIZATION * Math.max(0.2f, 1.0f - effectiveSpeed);
+
+        // Apply GCD (Greatest Common Divisor) fix to make rotations look human
+        float rotatedYaw = applyGCD(newRotations[0], currentYaw);
+        float rotatedPitch = applyGCD(newRotations[1], currentPitch);
 
         // Increment counter for pattern avoidance
         rotationCounter++;
@@ -150,39 +183,31 @@ public class RotationHandler {
             rotationCounter = 0;
 
             // Add random delay before applying this rotation to break timing patterns
-            if (random.nextFloat() < 0.3f) {
+            if (random.nextFloat() < 0.2f) {
                 try {
-                    Thread.sleep(random.nextInt(20) + 5);
+                    Thread.sleep(random.nextInt(10) + 1);
                 } catch (InterruptedException e) {
                     // Ignore
                 }
             }
 
             // Add slight variation to rotation values
-            if (random.nextFloat() < 0.4f) {
-                safeRotation[0] += (random.nextFloat() - 0.5f) * 2.0f;
-                safeRotation[1] += (random.nextFloat() - 0.5f) * 0.7f;
+            if (random.nextFloat() < 0.3f) {
+                rotatedYaw += (random.nextFloat() - 0.5f) * 1.2f;
+                rotatedPitch += (random.nextFloat() - 0.5f) * 0.5f;
             }
         }
 
-        // Store the rotation for server
-        float serverYawNew = safeRotation[0];
-        float serverPitchNew = safeRotation[1];
-
-        // Apply GCD (Greatest Common Divisor) fix
-        serverYawNew = applyGCD(serverYawNew, (request.silent ? serverYaw : mc.player.getYaw()));
-        serverPitchNew = applyGCD(serverPitchNew, (request.silent ? serverPitch : mc.player.getPitch()));
-
         if (request.silent) {
             // For silent rotations, only update server-side rotations
-            serverYaw = serverYawNew;
-            serverPitch = serverPitchNew;
+            serverYaw = rotatedYaw;
+            serverPitch = rotatedPitch;
 
             // For body rotation mode, update player's body and head yaw
             if (request.bodyOnly && mc.player != null) {
                 bodyRotation = true;
-                mc.player.bodyYaw = serverYawNew;
-                mc.player.headYaw = serverYawNew;
+                mc.player.bodyYaw = rotatedYaw;
+                mc.player.headYaw = rotatedYaw;
             } else {
                 bodyRotation = false;
             }
@@ -191,17 +216,17 @@ public class RotationHandler {
             rotatingClient = true;
             bodyRotation = false;
             moveFixEnabled = false; // Move fix not needed for visible rotations
-            serverYaw = serverYawNew;
-            serverPitch = serverPitchNew;
+            serverYaw = rotatedYaw;
+            serverPitch = rotatedPitch;
 
             // Apply to client visibly
-            mc.player.setYaw(serverYawNew);
-            mc.player.setPitch(serverPitchNew);
+            mc.player.setYaw(rotatedYaw);
+            mc.player.setPitch(rotatedPitch);
         }
 
         // Store time and changes for next comparison
-        lastYawChange = serverYaw - (request.silent ? serverYaw : mc.player.getYaw());
-        lastPitchChange = serverPitch - (request.silent ? serverPitch : mc.player.getPitch());
+        lastYawChange = rotatedYaw - currentYaw;
+        lastPitchChange = rotatedPitch - currentPitch;
         lastRotationTime = System.currentTimeMillis();
 
         // Call the callback if one was provided
@@ -211,96 +236,102 @@ public class RotationHandler {
     }
 
     /**
-     * Calculate a safe rotation to avoid fight.direction flags
+     * Calculate fast, near-instant rotation that still looks natural
      */
-    private static float[] getSafeRotation(float currentYaw, float currentPitch, float targetYaw, float targetPitch) {
+    private static float[] calculateInstantRotation(float currentYaw, float currentPitch,
+                                                    float targetYaw, float targetPitch) {
         // Calculate differences
-        float yawDifference = MathHelper.wrapDegrees(targetYaw - currentYaw);
-        float pitchDifference = targetPitch - currentPitch;
+        float yawDiff = MathHelper.wrapDegrees(targetYaw - currentYaw);
+        float pitchDiff = targetPitch - currentPitch;
 
-        // Limit change rates to avoid NCP direction flags
-        float safeYawChange = Math.signum(yawDifference) * Math.min(Math.abs(yawDifference), MAX_YAW_CHANGE);
-        float safePitchChange = Math.signum(pitchDifference) * Math.min(Math.abs(pitchDifference), MAX_PITCH_CHANGE);
+        // For instant rotations, we'll use up to 90% of the full difference
+        // This gives the appearance of a very fast but still slightly smooth rotation
+        float yawChange = yawDiff * 0.9f;
+        float pitchChange = pitchDiff * 0.9f;
 
-        // Calculate new rotation values
-        float newYaw = currentYaw + safeYawChange;
-        float newPitch = MathHelper.clamp(currentPitch + safePitchChange, -90.0f, 90.0f);
+        // Apply limits to avoid obvious snap rotations
+        yawChange = MathHelper.clamp(yawChange, -MAX_INSTANT_YAW_CHANGE, MAX_INSTANT_YAW_CHANGE);
+        pitchChange = MathHelper.clamp(pitchChange, -MAX_INSTANT_PITCH_CHANGE, MAX_INSTANT_PITCH_CHANGE);
 
-        // Randomize slightly to avoid patterns
-        newYaw += (random.nextFloat() - 0.5f) * YAW_RANDOMIZATION;
-        newPitch += (random.nextFloat() - 0.5f) * PITCH_RANDOMIZATION;
-
-        return new float[]{newYaw, newPitch};
+        return new float[] {
+                MathHelper.wrapDegrees(currentYaw + yawChange),
+                MathHelper.clamp(currentPitch + pitchChange, -90.0f, 90.0f)
+        };
     }
 
     /**
-     * Apply the GCD fix to rotation values to make them more human-like
+     * Calculate smooth rotation with enhanced speed scaling
+     */
+    private static float[] calculateSmoothRotation(float currentYaw, float currentPitch,
+                                                   float targetYaw, float targetPitch,
+                                                   float speed) {
+        // Calculate differences
+        float yawDiff = MathHelper.wrapDegrees(targetYaw - currentYaw);
+        float pitchDiff = targetPitch - currentPitch;
+
+        // Apply non-linear acceleration for more natural camera movement
+        // Square the speed to make the curve more dramatic at higher speeds
+        float effectiveSpeed = speed * speed * 2.0f;
+
+        // Apply speed factor with smooth acceleration and min/max limits
+        float yawChange = yawDiff * effectiveSpeed;
+        float pitchChange = pitchDiff * effectiveSpeed;
+
+        // Set limits based on speed to prevent too large changes
+        float yawLimit = MAX_SMOOTH_YAW_CHANGE * speed * 1.5f;
+        float pitchLimit = MAX_SMOOTH_PITCH_CHANGE * speed * 1.5f;
+
+        yawChange = MathHelper.clamp(yawChange, -yawLimit, yawLimit);
+        pitchChange = MathHelper.clamp(pitchChange, -pitchLimit, pitchLimit);
+
+        return new float[] {
+                MathHelper.wrapDegrees(currentYaw + yawChange),
+                MathHelper.clamp(currentPitch + pitchChange, -90.0f, 90.0f)
+        };
+    }
+
+    /**
+     * Apply GCD (Greatest Common Divisor) to rotation values to make them more human-like
+     * This simulates mouse movement increments seen in legitimate client rotations
      */
     private static float applyGCD(float targetRotation, float currentRotation) {
         float delta = MathHelper.wrapDegrees(targetRotation - currentRotation);
-        delta -= delta % (GCD_MULTIPLIER * Math.max(1.0f, Math.abs(delta) / 8.0f));
+
+        // Calculate GCD factor based on rotation magnitude
+        float gcdFactor = GCD_BASE;
+
+        // For very small rotations, use smaller GCD factor to allow finer movements
+        if (Math.abs(delta) < 1.0f) {
+            gcdFactor = 0.05f;
+        }
+        // For regular rotations, scale GCD with movement size
+        else {
+            gcdFactor *= Math.max(1.0f, Math.abs(delta) / 10.0f);
+        }
+
+        // Apply GCD
+        delta -= delta % gcdFactor;
+
+        // For near-zero changes, ensure we make a minimal adjustment
+        if (Math.abs(delta) < 0.001f && Math.abs(targetRotation - currentRotation) > 0.001f) {
+            delta = Math.signum(targetRotation - currentRotation) * gcdFactor;
+        }
+
         return MathHelper.wrapDegrees(currentRotation + delta);
     }
 
-    /**
-     * Get the client-side yaw (the original camera rotation)
-     */
-    public static float getClientYaw() {
-        return prevClientYaw;
-    }
-
-    /**
-     * Get the client-side pitch (the original camera rotation)
-     */
-    public static float getClientPitch() {
-        return prevClientPitch;
-    }
-
-    /**
-     * Get the server-side yaw (the rotation the server thinks we have)
-     */
-    public static float getServerYaw() {
-        return serverYaw;
-    }
-
-    /**
-     * Get the server-side pitch (the rotation the server thinks we have)
-     */
-    public static float getServerPitch() {
-        return serverPitch;
-    }
-
-    /**
-     * Check if we're currently applying a client-visible rotation
-     */
-    public static boolean isRotatingClient() {
-        return rotatingClient;
-    }
-
-    /**
-     * Check if we're currently in body-only rotation mode
-     */
-    public static boolean isBodyRotation() {
-        return bodyRotation;
-    }
-
-    /**
-     * Check if any rotation is currently active (silent or visible)
-     */
-    public static boolean isRotationActive() {
-        return rotationInProgress;
-    }
-
-    /**
-     * Check if movement fix is currently enabled
-     */
-    public static boolean isMoveFixEnabled() {
-        return moveFixEnabled;
-    }
+    // Accessor methods
+    public static float getClientYaw() { return prevClientYaw; }
+    public static float getClientPitch() { return prevClientPitch; }
+    public static float getServerYaw() { return serverYaw; }
+    public static float getServerPitch() { return serverPitch; }
+    public static boolean isRotatingClient() { return rotatingClient; }
+    public static boolean isBodyRotation() { return bodyRotation; }
+    public static boolean isRotationActive() { return rotationInProgress; }
+    public static boolean isMoveFixEnabled() { return moveFixEnabled; }
 
     /**
      * Set whether the MoveFix is currently being used
-     * This is called from the RotationMixin to coordinate with rendering
      */
     public static void setUsingMoveFix(boolean using) {
         usingMoveFix = using;
@@ -308,7 +339,6 @@ public class RotationHandler {
 
     /**
      * Check if client is currently using MoveFix
-     * This helps coordinate with rendering systems
      */
     public static boolean isUsingMoveFix() {
         return usingMoveFix;
@@ -337,7 +367,7 @@ public class RotationHandler {
         // Get player eye position
         Vec3d eyePos = mc.player.getEyePos();
 
-        // Calculate difference
+        // Calculate differences
         double diffX = position.x - eyePos.x;
         double diffY = position.y - eyePos.y;
         double diffZ = position.z - eyePos.z;
@@ -372,6 +402,7 @@ public class RotationHandler {
 
     /**
      * Smoothly interpolates between current rotation and target rotation
+     * This method is an enhanced version specifically for external use when more control is needed
      *
      * @param currentYaw   Current yaw
      * @param currentPitch Current pitch
@@ -383,27 +414,12 @@ public class RotationHandler {
     public static float[] smoothRotation(float currentYaw, float currentPitch,
                                          float targetYaw, float targetPitch,
                                          float speed) {
-        // Calculate angle differences
-        float yawDiff = MathHelper.wrapDegrees(targetYaw - currentYaw);
-        float pitchDiff = targetPitch - currentPitch;
-
-        // Randomize speed slightly for human-like movement
-        float randomizedSpeed = speed * (0.95f + random.nextFloat() * 0.1f);
-
-        // Apply speed factor with minimum and maximum rotation constraints
-        float maxChange = Math.min(10f, MAX_YAW_CHANGE / 2);
-        float yawChange = Math.max(Math.min(yawDiff * randomizedSpeed, maxChange), -maxChange);
-        float pitchChange = Math.max(Math.min(pitchDiff * randomizedSpeed, maxChange), -maxChange);
-
-        // Calculate new rotations
-        float newYaw = currentYaw + yawChange;
-        float newPitch = MathHelper.clamp(currentPitch + pitchChange, -90f, 90f);
-
-        // Apply GCD to make it look human
-        newYaw = applyGCD(newYaw, currentYaw);
-        newPitch = applyGCD(newPitch, currentPitch);
-
-        return new float[]{newYaw, newPitch};
+        // Use different implementations based on speed
+        if (speed >= QUICK_ROTATION_THRESHOLD) {
+            return calculateInstantRotation(currentYaw, currentPitch, targetYaw, targetPitch);
+        } else {
+            return calculateSmoothRotation(currentYaw, currentPitch, targetYaw, targetPitch, speed);
+        }
     }
 
     /**
@@ -427,13 +443,13 @@ public class RotationHandler {
         // Calculate expiration time
         long expirationTime = System.currentTimeMillis() + durationMs;
 
-        // Create and add the request
-        RotationRequest request = new RotationRequest(yaw, pitch, priority, expirationTime, silent, bodyOnly, moveFix, callback);
-        activeRequests.add(request);
+        // Add the request
+        RotationRequest request = new RotationRequest(yaw, pitch, priority, expirationTime, silent, bodyOnly, moveFix, callback, 1.0f);
+        activeRequests.put(priority, request);
     }
 
     /**
-     * Request a rotation (will be applied based on priority)
+     * Request a rotation with specific speed control (will be applied based on priority)
      *
      * @param yaw        Target yaw angle
      * @param pitch      Target pitch angle
@@ -441,23 +457,34 @@ public class RotationHandler {
      * @param durationMs How long to hold this rotation (in milliseconds)
      * @param silent     Whether the rotation should only be sent to the server (not visible to client)
      * @param bodyOnly   Whether to show rotation on player's body only (for 3rd person view)
+     * @param moveFix    Whether to apply movement direction fix for silent rotations
+     * @param speed      Speed factor (0.0-1.0) where 1.0 is fastest/instant
      * @param callback   Optional callback when rotation is applied
+     */
+    public static void requestRotation(float yaw, float pitch, int priority, long durationMs,
+                                       boolean silent, boolean bodyOnly, boolean moveFix,
+                                       float speed, Consumer<RotationState> callback) {
+        // Normalize rotation angles
+        yaw = MathHelper.wrapDegrees(yaw);
+        pitch = MathHelper.clamp(MathHelper.wrapDegrees(pitch), -90f, 90f);
+
+        // Calculate expiration time
+        long expirationTime = System.currentTimeMillis() + durationMs;
+
+        // Add the request
+        RotationRequest request = new RotationRequest(yaw, pitch, priority, expirationTime,
+                silent, bodyOnly, moveFix, callback, speed);
+        activeRequests.put(priority, request);
+    }
+
+    /**
+     * Convenience methods with fewer parameters
      */
     public static void requestRotation(float yaw, float pitch, int priority, long durationMs,
                                        boolean silent, boolean bodyOnly, Consumer<RotationState> callback) {
         requestRotation(yaw, pitch, priority, durationMs, silent, bodyOnly, false, callback);
     }
 
-    /**
-     * Request a rotation (will be applied based on priority)
-     *
-     * @param yaw        Target yaw angle
-     * @param pitch      Target pitch angle
-     * @param priority   Priority level (higher numbers take precedence)
-     * @param durationMs How long to hold this rotation (in milliseconds)
-     * @param silent     Whether the rotation should only be sent to the server (not visible to client)
-     * @param callback   Optional callback when rotation is applied
-     */
     public static void requestRotation(float yaw, float pitch, int priority, long durationMs,
                                        boolean silent, Consumer<RotationState> callback) {
         requestRotation(yaw, pitch, priority, durationMs, silent, false, false, callback);
@@ -465,13 +492,6 @@ public class RotationHandler {
 
     /**
      * Request a rotation to look at a specific position
-     *
-     * @param position   Position to look at
-     * @param priority   Priority level (higher numbers take precedence)
-     * @param durationMs How long to hold this rotation (in milliseconds)
-     * @param silent     Whether the rotation should only be sent to the server (not visible to client)
-     * @param moveFix    Whether to apply movement direction fix for silent rotations
-     * @param callback   Optional callback when rotation is applied
      */
     public static void requestLookAt(Vec3d position, int priority, long durationMs,
                                      boolean silent, boolean moveFix, Consumer<RotationState> callback) {
@@ -479,37 +499,29 @@ public class RotationHandler {
         requestRotation(rotations[0], rotations[1], priority, durationMs, silent, false, moveFix, callback);
     }
 
-    /**
-     * Request a rotation to look at a specific position
-     *
-     * @param position   Position to look at
-     * @param priority   Priority level (higher numbers take precedence)
-     * @param durationMs How long to hold this rotation (in milliseconds)
-     * @param silent     Whether the rotation should only be sent to the server (not visible to client)
-     * @param callback   Optional callback when rotation is applied
-     */
     public static void requestLookAt(Vec3d position, int priority, long durationMs,
                                      boolean silent, Consumer<RotationState> callback) {
         requestLookAt(position, priority, durationMs, silent, false, callback);
     }
 
     /**
+     * Request a fast rotation to look at a position
+     */
+    public static void requestFastLookAt(Vec3d position, int priority, long durationMs,
+                                         boolean silent, Consumer<RotationState> callback) {
+        float[] rotations = calculateLookAt(position);
+        requestRotation(rotations[0], rotations[1], priority, durationMs, silent, false, false, 1.0f, callback);
+    }
+
+    /**
      * Cancel all rotations for a specific priority level
      */
     public static void cancelRotationByPriority(int priority) {
-        activeRequests.removeIf(request -> request.priority == priority);
+        activeRequests.remove(priority);
     }
 
     /**
      * Request a rotation to look at an entity (targeting its eyes or center)
-     *
-     * @param entity     Entity to look at
-     * @param targetEyes Whether to target eyes (true) or center (false)
-     * @param priority   Priority level (higher numbers take precedence)
-     * @param durationMs How long to hold this rotation (in milliseconds)
-     * @param silent     Whether the rotation should only be sent to the server (not visible to client)
-     * @param moveFix    Whether to apply movement direction fix for silent rotations
-     * @param callback   Optional callback when rotation is applied
      */
     public static void requestLookAtEntity(Entity entity, boolean targetEyes, int priority, long durationMs,
                                            boolean silent, boolean moveFix, Consumer<RotationState> callback) {
@@ -530,79 +542,23 @@ public class RotationHandler {
         requestLookAt(pos, priority, durationMs, silent, moveFix, callback);
     }
 
-    /**
-     * Request a rotation to look at an entity (targeting its eyes or center)
-     *
-     * @param entity     Entity to look at
-     * @param targetEyes Whether to target eyes (true) or center (false)
-     * @param priority   Priority level (higher numbers take precedence)
-     * @param durationMs How long to hold this rotation (in milliseconds)
-     * @param silent     Whether the rotation should only be sent to the server (not visible to client)
-     * @param callback   Optional callback when rotation is applied
-     */
     public static void requestLookAtEntity(Entity entity, boolean targetEyes, int priority, long durationMs,
                                            boolean silent, Consumer<RotationState> callback) {
         requestLookAtEntity(entity, targetEyes, priority, durationMs, silent, false, callback);
     }
 
     /**
-     * Request smooth rotation to look at a position
-     *
-     * @param position   Position to look at
-     * @param speed      Rotation speed factor (higher = faster)
-     * @param priority   Priority level (higher numbers take precedence)
-     * @param durationMs How long to hold this rotation (in milliseconds)
-     * @param silent     Whether the rotation should only be sent to the server (not visible to client)
-     * @param moveFix    Whether to apply movement direction fix for silent rotations
-     * @param callback   Optional callback when rotation is applied
+     * Request smooth rotation to look at a position with custom speed control
      */
     public static void requestSmoothLookAt(Vec3d position, float speed, int priority, long durationMs,
                                            boolean silent, boolean moveFix, Consumer<RotationState> callback) {
         float[] targetRotations = calculateLookAt(position);
-
-        float[] currentRotations;
-        if (silent) {
-            // For silent rotations, use server rotation as starting point
-            currentRotations = new float[]{serverYaw, serverPitch};
-        } else {
-            // For visible rotations, use client rotation as starting point
-            currentRotations = new float[]{
-                    mc.player != null ? mc.player.getYaw() : 0f,
-                    mc.player != null ? mc.player.getPitch() : 0f
-            };
-        }
-
-        float[] smoothRotations = smoothRotation(
-                currentRotations[0], currentRotations[1],
-                targetRotations[0], targetRotations[1],
-                speed
-        );
-
-        requestRotation(smoothRotations[0], smoothRotations[1], priority, durationMs, silent, false, moveFix, callback);
-    }
-
-    /**
-     * Request smooth rotation to look at a position
-     *
-     * @param position   Position to look at
-     * @param speed      Rotation speed factor (higher = faster)
-     * @param priority   Priority level (higher numbers take precedence)
-     * @param durationMs How long to hold this rotation (in milliseconds)
-     * @param silent     Whether the rotation should only be sent to the server (not visible to client)
-     * @param callback   Optional callback when rotation is applied
-     */
-    public static void requestSmoothLookAt(Vec3d position, float speed, int priority, long durationMs,
-                                           boolean silent, Consumer<RotationState> callback) {
-        requestSmoothLookAt(position, speed, priority, durationMs, silent, false, callback);
+        requestRotation(targetRotations[0], targetRotations[1], priority, durationMs,
+                silent, false, moveFix, speed, callback);
     }
 
     /**
      * Check if the current rotation is within a certain angle of the target rotation
-     *
-     * @param targetYaw     Target yaw angle
-     * @param targetPitch   Target pitch angle
-     * @param maxDifference Maximum allowed difference in degrees
-     * @return Whether current rotation is within range
      */
     public static boolean isWithinRange(float targetYaw, float targetPitch, float maxDifference) {
         if (mc.player == null) return false;
@@ -625,10 +581,6 @@ public class RotationHandler {
 
     /**
      * Check if current rotation is looking at a specific position within a certain range
-     *
-     * @param position      Position to check
-     * @param maxDifference Maximum allowed difference in degrees
-     * @return Whether current rotation is looking at the position
      */
     public static boolean isLookingAt(Vec3d position, float maxDifference) {
         float[] rotations = calculateLookAt(position);
@@ -637,10 +589,6 @@ public class RotationHandler {
 
     /**
      * Check if the current rotation would be able to see the given position
-     *
-     * @param position Position to check
-     * @param fov      Field of view in degrees
-     * @return Whether the position is within the given field of view
      */
     public static boolean isInFieldOfView(Vec3d position, float fov) {
         if (mc.player == null) return false;
@@ -673,9 +621,11 @@ public class RotationHandler {
         final boolean bodyOnly;
         final boolean moveFix;
         final Consumer<RotationState> callback;
+        final float speed;
 
         public RotationRequest(float yaw, float pitch, int priority, long expirationTime,
-                               boolean silent, boolean bodyOnly, boolean moveFix, Consumer<RotationState> callback) {
+                               boolean silent, boolean bodyOnly, boolean moveFix,
+                               Consumer<RotationState> callback, float speed) {
             this.yaw = yaw;
             this.pitch = pitch;
             this.priority = priority;
@@ -684,6 +634,7 @@ public class RotationHandler {
             this.bodyOnly = bodyOnly;
             this.moveFix = moveFix;
             this.callback = callback;
+            this.speed = Math.max(0.05f, Math.min(1.0f, speed)); // Clamp speed to valid range
         }
     }
 

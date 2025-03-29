@@ -73,7 +73,7 @@ public class Aura extends Module {
     );
 
     private final Setting<Float> rotationSpeed = register(
-            new Setting<>("RotationSpeed", 0.4f, 0.0f, 2.0f, "Speed of rotation to targets (0 = smooth, 1 = instant)")
+            new Setting<>("RotationSpeed", 0.8f, 0.0f, 1.0f, "Speed of rotation to targets (0 = smooth, 1 = instant)")
     );
 
     private final Setting<Boolean> useMoveFixSetting = register( // New MoveFix Toggle
@@ -189,20 +189,37 @@ public class Aura extends Module {
         }
     }
 
-    /** Processes the main attack and rotation logic. */
+    /**
+     * Processes the main attack and rotation logic.
+     */
     private void processAttack() {
-        // --- Attack Timer ---
+        // --- Attack Timer with Improved CPS Handling ---
         long currentTime = System.currentTimeMillis();
-        float baseDelay = 1000.0f / Math.max(0.1f, cps.getValue()); // Avoid division by zero
+
+        // Calculate delay between attacks from CPS value
+        float targetCPS = cps.getValue();
+        float baseDelayMs = 700.0f / targetCPS; // Convert to milliseconds
+
+        // Calculate attack delay with proper randomization
         long attackDelay;
         if (randomCps.getValue()) {
-            float variation = baseDelay * 0.2f; // 20% variation
-            attackDelay = (long) (baseDelay + (random.nextDouble() * variation * 2.0 - variation));
+            // Randomize around the target CPS (±10%)
+            float randomFactor = 0.1f;
+            float minDelayMs = baseDelayMs * (1.0f - randomFactor);
+            float maxDelayMs = baseDelayMs * (1.0f + randomFactor);
+            // Generate a random delay between min and max
+            attackDelay = (long)(minDelayMs + random.nextFloat() * (maxDelayMs - minDelayMs));
         } else {
-            float variation = baseDelay * 0.05f; // 5% variation
-            attackDelay = (long) (baseDelay + (random.nextDouble() * variation * 2.0 - variation));
+            // Very minimal variation (±2%) for a more consistent but still natural feel
+            float minVariation = baseDelayMs * 0.98f;
+            float maxVariation = baseDelayMs * 1.02f;
+            attackDelay = (long)(minVariation + random.nextFloat() * (maxVariation - minVariation));
         }
-        attackDelay = Math.max(50, attackDelay); // Min ~1 tick delay
+
+        // Ensure we never go below a minimum delay to prevent server-side rejection
+        attackDelay = Math.max(20, attackDelay); // Minimum 20ms (1 game tick)
+
+        // Check if we can attack now based on the calculated delay
         boolean canAttack = currentTime - lastAttackTime >= attackDelay;
 
         // --- Target Handling ---
@@ -214,7 +231,7 @@ public class Aura extends Module {
             // Target Point Calculation
             targetPoint = getBestTargetPoint(primaryTarget);
             if (targetPoint == null) { // Fallback if no point found (e.g., throughWalls=false, no LoS)
-                targetPoint = primaryTarget.getEyePos(); // Or potentially cancel here?
+                targetPoint = primaryTarget.getEyePos(); // Fallback to eye position
             }
 
             // Visibility Check (if needed)
@@ -226,10 +243,10 @@ public class Aura extends Module {
                 return; // Don't rotate or attack
             }
 
-            // Rotation Handling
+            // Rotation Handling - Use fast rotations for Aura
             handleRotations(); // Requests rotation via RotationHandler
 
-            // Rotation Line-of-Sight Check (if rotating and setting enabled)
+            // Rotation Line-of-Sight Check
             boolean canHitWithRotation = true;
             if (raytraceCheck.getValue() && RotationHandler.isRotationActive() && rotating) {
                 canHitWithRotation = RayCastUtil.canSeeEntityFromRotation(
@@ -252,7 +269,10 @@ public class Aura extends Module {
                     stopBlocking();
                 }
 
+                // Execute the attack
                 attack(primaryTarget);
+
+                // Always update the time after attacking to maintain accurate CPS
                 lastAttackTime = currentTime;
 
                 if (wasBlocking) {
