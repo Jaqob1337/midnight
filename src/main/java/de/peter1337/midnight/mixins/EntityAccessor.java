@@ -1,29 +1,33 @@
-package de.peter1337.midnight.mixins; // Ensure this package exists
+// --- EntityAccessor.java ---
+package de.peter1337.midnight.mixins;
 
-import net.minecraft.entity.Entity; // Target Entity class where yaw field is likely declared
+import net.minecraft.entity.Entity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Accessor;
 
 /**
  * Accessor interface to get/set the yaw field of an Entity.
- * Used by MovementFixMixin to bypass potential @Shadow resolution issues.
+ * Used by MovementFixMixin to access and modify entity rotation directly.
  */
-@Mixin(Entity.class) // Target the class where the yaw field is actually declared
+@Mixin(Entity.class)
 public interface EntityAccessor {
 
     /**
      * Provides access to the yaw field.
-     * !!! REPLACE "yaw" with the correct mapped field name for your setup (e.g., yRot) !!!
+     * Note: Use the correct mapped field name based on your Minecraft version.
+     * For 1.21.4, this may be "yRot", "yaw", or another mapped name. Check your mappings.
+     *
      * @return The value of the yaw field.
      */
-    @Accessor("yaw") // <--- !!! REPLACE "yaw" WITH THE CORRECT MAPPED FIELD NAME !!!
-    float getYawField(); // Method name can be anything, annotation links it
+    @Accessor("yaw") // Make sure this matches the correct mapped field name in your environment (e.g., "yRot")
+    float getYawField();
 
     /**
      * Allows setting the yaw field.
-     * !!! REPLACE "yaw" with the correct mapped field name for your setup (e.g., yRot) !!!
+     * Note: Use the correct mapped field name based on your Minecraft version.
+     *
      * @param yaw The new value for the yaw field.
      */
-    @Accessor("yaw") // <--- !!! REPLACE "yaw" WITH THE CORRECT MAPPED FIELD NAME !!!
-    void setYawField(float yaw); // Method name can be anything, annotation links it
+    @Accessor("yaw") // Make sure this matches the correct mapped field name in your environment (e.g., "yRot")
+    void setYawField(float yaw);
 }

@@ -83,6 +83,11 @@ public class Scaffold extends Module {
             new Setting<>("MaxReach", 4.5f, 3.0f, 6.0f, "Maximum reach distance for block placement")
     );
 
+    // Track the original movement inputs for the direct movement fix
+    private float originalForward = -0f;
+    private float originalSideways = 0f;
+    private boolean movementModified = false;
+
     public Scaffold() {
         super("Scaffold", "Places blocks under you", Category.PLAYER, "m");
     }
@@ -91,15 +96,7 @@ public class Scaffold extends Module {
     public void onEnable() {
         lastPlacedPos = null;
         rotationsSet = false;
-
-        // Initialize bridge direction based on player's current yaw
-        if (mc.player != null) {
-            bridgeDirection = getHorizontalDirection(mc.player.getYaw());
-            targetYaw = getYawFromDirection(bridgeDirection.getOpposite());
-
-            // Apply initial backward rotation
-            applyBackwardRotation();
-        }
+        movementModified = false;
     }
 
     @Override
@@ -107,7 +104,50 @@ public class Scaffold extends Module {
         RotationHandler.cancelRotationByPriority(ROTATION_PRIORITY);
         if (mc.player != null) {
             mc.options.sneakKey.setPressed(false); // Ensure sneak is off
+
+            // Restore movement inputs if they were modified
+            if (movementModified) {
+                restoreMovement();
+            }
         }
+    }
+
+    /**
+     * Apply the direct movement fix by modifying input directly
+     */
+    private void applyMovementFix() {
+        if (!moveFix.getValue() || mc.player == null) return;
+
+        // Store original movement values if we haven't already
+        if (!movementModified) {
+            originalForward = mc.player.input.movementForward;
+            originalSideways = mc.player.input.movementSideways;
+
+            // Completely reverse movement direction for scaffold
+            // This makes W feel like "forward" even though you're going backward
+            mc.player.input.movementForward = originalForward;
+            mc.player.input.movementSideways = originalSideways;
+
+            // Debug output to verify the reversal is happening
+            System.out.println("Scaffold MoveFix: forward " + originalForward + " → " + mc.player.input.movementForward +
+                    ", sideways " + originalSideways + " → " + mc.player.input.movementSideways);
+
+            // Set the context in RotationHandler for compatibility with existing code
+            RotationHandler.setMoveFixContext("scaffold");
+
+            movementModified = true;
+        }
+    }
+
+    /**
+     * Restore original movement inputs
+     */
+    private void restoreMovement() {
+        if (!movementModified || mc.player == null) return;
+
+        mc.player.input.movementForward = originalForward;
+        mc.player.input.movementSideways = originalSideways;
+        movementModified = false;
     }
 
     /**
@@ -116,34 +156,34 @@ public class Scaffold extends Module {
     public void preUpdate() {
         if (!isEnabled() || mc.player == null || mc.world == null) return;
 
+        // First, apply the movement fix for WASD keys - do this BEFORE any other logic
+        // This makes W feel like forward even though we're building backward
+        if (moveFix.getValue()) {
+            applyMovementFix();
+        }
+
         // Handle safe walk (sneaking at edges)
         handleSafeWalk();
 
-        // Always apply backward rotation - this happens regardless of whether a block is being placed
-        applyBackwardRotation();
+        // Always set the bridging direction opposite to where the player is looking
+        bridgeDirection = getHorizontalDirection(mc.player.getYaw());
+        targetYaw = getYawFromDirection(bridgeDirection.getOpposite());
 
         // Try to find a placement position
         PlacementInfo placement = findPlacement();
         if (placement != null) {
-            // Optionally update bridge direction based on placement
-            Direction newDirection = getBridgeDirectionFromPlacement(placement);
-            if (newDirection != null) {
-                bridgeDirection = newDirection;
-                targetYaw = getYawFromDirection(bridgeDirection.getOpposite());
-            }
-
-            // Apply rotation for block placement
+            // Apply rotation for block placement - always facing backward
             if (rotations.getValue()) {
                 float[] placeAngles = calculateRotation(placement.hitVec);
                 targetPitch = placeAngles[1]; // Use calculated pitch for placement
 
-                // Apply rotations with looking down for placement but backward for movement
+                // Apply rotations for placement - always backward
                 handleRotations(targetYaw, targetPitch);
             }
 
             // Check if we can place a block now
             if (canPlaceNow() && hasBlocks()) {
-                // Perform the placement
+                // Perform the placement (no need to apply movement fix again)
                 placeBlock(placement);
 
                 // Handle tower jumping
@@ -152,34 +192,51 @@ public class Scaffold extends Module {
                 }
             }
         } else if (rotations.getValue()) {
-            // Even if no placement is needed, still apply backward rotation to ensure
-            // continuous movement correction while scaffolding
+            // Even if no placement is needed, still apply the backward rotation
+            // This is important for consistent behavior
             handleRotations(targetYaw, targetPitch);
         }
     }
 
-    /**
-     * Main update method, called every tick
-     */
     @Override
     public void onUpdate() {
-        // Most functionality is in preUpdate to handle rotations before movement
+        // Let the normal update happen
+        // but don't restore movement until the module is disabled
+        // This ensures movement stays reversed the entire time
     }
 
     /**
-     * Applies backward rotation for natural bridging appearance
+     * Determines the direction the player is moving based on input
+     * @return The direction of movement, or null if not moving
      */
-    private void applyBackwardRotation() {
-        if (mc.player == null || !rotations.getValue()) return;
+    private Direction determineMovementDirection() {
+        if (mc.player == null) return null;
 
-        // If bridge direction isn't set yet, initialize it
-        if (bridgeDirection == null) {
-            bridgeDirection = getHorizontalDirection(mc.player.getYaw());
-            targetYaw = getYawFromDirection(bridgeDirection.getOpposite());
+        // Get the input values
+        float forward = mc.player.input.movementForward;
+        float sideways = mc.player.input.movementSideways;
+
+        // If not moving, return null
+        if (Math.abs(forward) < 0.1f && Math.abs(sideways) < 0.1f) {
+            return null;
         }
 
-        // Apply backward-facing rotations (opposite to bridge direction)
-        handleRotations(targetYaw, targetPitch);
+        // Get the player's looking direction (yaw)
+        float yaw = mc.player.getYaw();
+
+        // Adjust yaw based on input direction
+        // This is standard Minecraft movement logic
+        if (forward < 0) {
+            yaw += 180; // Backward = opposite direction
+        }
+        if (sideways > 0) { // Right
+            yaw -= 90 * (forward == 0 ? 1 : Math.abs(forward) / forward * 0.5f);
+        } else if (sideways < 0) { // Left
+            yaw += 90 * (forward == 0 ? 1 : Math.abs(forward) / forward * 0.5f);
+        }
+
+        // Convert adjusted yaw to a direction
+        return getHorizontalDirection(yaw);
     }
 
     /**
