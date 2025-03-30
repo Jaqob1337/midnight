@@ -59,6 +59,7 @@ public class RotationHandler {
     private static long lastRotationTime = 0L;
     private static final int ROTATION_BREAK_THRESHOLD = 20; // Number of rotations before introducing variation
 
+    private static String moveFixContext = "default";
     /**
      * Initializes the rotation handler.
      */
@@ -475,6 +476,22 @@ public class RotationHandler {
         RotationRequest request = new RotationRequest(yaw, pitch, priority, expirationTime,
                 silent, bodyOnly, moveFix, callback, speed);
         activeRequests.put(priority, request);
+    }
+
+    /**
+     * Sets the context for the movement fix - different contexts have different behaviors
+     * @param context The context, e.g., "scaffold", "aura", etc.
+     */
+    public static void setMoveFixContext(String context) {
+        moveFixContext = context;
+    }
+
+    /**
+     * Gets the current move fix context
+     * @return The current context string
+     */
+    public static String getMoveFixContext() {
+        return moveFixContext;
     }
 
     /**

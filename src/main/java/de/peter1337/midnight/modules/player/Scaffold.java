@@ -417,6 +417,16 @@ public class Scaffold extends Module {
         boolean isBody = rotationMode.getValue().equals("Body");
         boolean useMoveFix = (isSilent || isBody) && moveFix.getValue();
 
+        // Set the move fix context to "scaffold" for improved movement transformation
+        if (useMoveFix) {
+            try {
+                // Try to use the new method, but handle if it's not implemented yet
+                RotationHandler.setMoveFixContext("scaffold");
+            } catch (Exception e) {
+                // Silently ignore if the method doesn't exist yet
+            }
+        }
+
         if (isSilent) {
             // Silent rotations - send to server but don't show on client
             RotationHandler.requestRotation(
