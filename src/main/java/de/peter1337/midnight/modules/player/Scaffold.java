@@ -84,7 +84,7 @@ public class Scaffold extends Module {
     );
 
     // Track the original movement inputs for the direct movement fix
-    private float originalForward = -0f;
+    private float originalForward = 0f;
     private float originalSideways = 0f;
     private boolean movementModified = false;
 
@@ -113,7 +113,8 @@ public class Scaffold extends Module {
     }
 
     /**
-     * Apply the direct movement fix by modifying input directly
+     * Apply movement fix that DIRECTLY OVERRIDES movement based on key presses
+     * This completely bypasses the normal movement system
      */
     private void applyMovementFix() {
         if (!moveFix.getValue() || mc.player == null) return;
@@ -123,17 +124,48 @@ public class Scaffold extends Module {
             originalForward = mc.player.input.movementForward;
             originalSideways = mc.player.input.movementSideways;
 
-            // Completely reverse movement direction for scaffold
-            // This makes W feel like "forward" even though you're going backward
-            mc.player.input.movementForward = originalForward;
-            mc.player.input.movementSideways = originalSideways;
+            // Get the raw keyboard state directly from LWJGL/Minecraft options
+            boolean wPressed = mc.options.forwardKey.isPressed();
+            boolean sPressed = mc.options.backKey.isPressed();
+            boolean aPressed = mc.options.leftKey.isPressed();
+            boolean dPressed = mc.options.rightKey.isPressed();
 
-            // Debug output to verify the reversal is happening
-            System.out.println("Scaffold MoveFix: forward " + originalForward + " → " + mc.player.input.movementForward +
-                    ", sideways " + originalSideways + " → " + mc.player.input.movementSideways);
+            // COMPLETELY INVERT ALL DIRECTIONS:
+            // - W key becomes BACKWARDS (negative value)
+            // - S key becomes FORWARDS (positive value)
+            // - A key becomes RIGHT (negative value)
+            // - D key becomes LEFT (positive value)
 
-            // Set the context in RotationHandler for compatibility with existing code
-            RotationHandler.setMoveFixContext("scaffold");
+            // Clear any existing movement values first
+            mc.player.input.movementForward = 0.0f;
+            mc.player.input.movementSideways = 0.0f;
+
+            // Forward/backward movement
+            if (wPressed && !sPressed) {
+                // W key: force -1.0 (backward)
+                mc.player.input.movementForward = -1.0f;
+            } else if (sPressed && !wPressed) {
+                // S key: force +1.0 (forward)
+                mc.player.input.movementForward = 1.0f;
+            }
+
+            // Left/right movement
+            if (aPressed && !dPressed) {
+                // A key: force -1.0 (right)
+                mc.player.input.movementSideways = -1.0f;
+            } else if (dPressed && !aPressed) {
+                // D key: force +1.0 (left)
+                mc.player.input.movementSideways = 1.0f;
+            }
+
+            // Very important debug info
+            System.out.println("[Scaffold] DIRECT KEY OVERRIDE: Keys W=" + wPressed + " S=" + sPressed +
+                    " A=" + aPressed + " D=" + dPressed +
+                    " → Set forward=" + mc.player.input.movementForward +
+                    ", sideways=" + mc.player.input.movementSideways);
+
+            // Tell the RotationHandler to completely skip any further transformations
+            RotationHandler.setMoveFixContext("scaffold_direct_100");
 
             movementModified = true;
         }
@@ -200,9 +232,32 @@ public class Scaffold extends Module {
 
     @Override
     public void onUpdate() {
-        // Let the normal update happen
-        // but don't restore movement until the module is disabled
-        // This ensures movement stays reversed the entire time
+        // Run another direct movement fix in the main update to ensure it sticks
+        // This is a failsafe in case something else modifies movement values
+        if (isEnabled() && moveFix.getValue() && mc.player != null && movementModified) {
+            // Get the raw keyboard state again
+            boolean wPressed = mc.options.forwardKey.isPressed();
+            boolean sPressed = mc.options.backKey.isPressed();
+            boolean aPressed = mc.options.leftKey.isPressed();
+            boolean dPressed = mc.options.rightKey.isPressed();
+
+            // Re-apply our overrides to ensure they stick
+            if (wPressed && !sPressed) {
+                mc.player.input.movementForward = -1.0f;
+            } else if (sPressed && !wPressed) {
+                mc.player.input.movementForward = 1.0f;
+            } else {
+                mc.player.input.movementForward = 0.0f;
+            }
+
+            if (aPressed && !dPressed) {
+                mc.player.input.movementSideways = -1.0f;
+            } else if (dPressed && !aPressed) {
+                mc.player.input.movementSideways = 1.0f;
+            } else {
+                mc.player.input.movementSideways = 0.0f;
+            }
+        }
     }
 
     /**
@@ -478,7 +533,7 @@ public class Scaffold extends Module {
         if (useMoveFix) {
             try {
                 // Try to use the new method, but handle if it's not implemented yet
-                RotationHandler.setMoveFixContext("scaffold");
+                RotationHandler.setMoveFixContext("scaffold_reversed");
             } catch (Exception e) {
                 // Silently ignore if the method doesn't exist yet
             }

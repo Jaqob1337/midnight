@@ -77,16 +77,55 @@ public abstract class MovementFixMixin {
             player.bodyYaw = serverYaw;
             player.headYaw = serverYaw;
 
-            // Calculate rotation difference (how much server differs from client view)
-            float rotationDiff = MathHelper.wrapDegrees(serverYaw - clientYaw);
+            // Get the move fix context
+            String moveFixContext = RotationHandler.getMoveFixContext();
 
-            // Calculate transformed movement
+            // For 100% guaranteed direct movement control
+            if (moveFixContext != null && moveFixContext.equalsIgnoreCase("scaffold_direct_100")) {
+                // CRITICAL: USE THE VALUES EXACTLY AS-IS
+                // Do not apply any transformations at all
+                float newForward = midnight_originalForward;
+                float newSideways = midnight_originalSideways;
+
+                // Debug log to confirm we're using this special case
+                Midnight.LOGGER.info("[Scaffold] 100% DIRECT MOVEMENT CONTROL ACTIVE: " +
+                        "forward=" + newForward + ", sideways=" + newSideways);
+
+                // IMPORTANT: Make sure these values aren't modified anywhere else by skipping any further processing
+                input.movementForward = newForward;
+                input.movementSideways = newSideways;
+
+                // Skip all other processing by using the move fix flag
+                RotationHandler.setUsingMoveFix(true);
+                return;
+            }
+
+            // Calculate new forward and sideways values based on context
             float newForward;
             float newSideways;
 
+            // Special handling for scaffold_direct context
+            if (moveFixContext != null && moveFixContext.equalsIgnoreCase("scaffold_direct")) {
+                // For scaffold_direct, Scaffold module has directly set the movement values
+                // based on which keys are pressed, so we use them exactly as they are
+                newForward = midnight_originalForward;
+                newSideways = midnight_originalSideways;
+
+                // Debug output for verification
+                Midnight.LOGGER.debug("Using scaffold_direct context: using direct key-based values");
+            }
+            // Special handling for scaffold_reversed context
+            else if (moveFixContext != null && moveFixContext.equalsIgnoreCase("scaffold_reversed")) {
+                // For scaffold_reversed, the Scaffold module has already inverted the inputs
+                // So we don't need to transform the movement any further
+                newForward = midnight_originalForward;
+                newSideways = midnight_originalSideways;
+
+                // Debug output for verification
+                Midnight.LOGGER.debug("Using scaffold_reversed context: keeping inverted values");
+            }
             // For scaffold, use a special case with custom handling
-            String moveFixContext = RotationHandler.getMoveFixContext();
-            if (moveFixContext != null && moveFixContext.equalsIgnoreCase("scaffold")) {
+            else if (moveFixContext != null && moveFixContext.equalsIgnoreCase("scaffold")) {
                 // For scaffolding, we need a more specific approach
                 // We want to prioritize the client's visual direction for movement
 
@@ -116,6 +155,7 @@ public abstract class MovementFixMixin {
                 }
             } else {
                 // Standard movement transformation using rotation matrices
+                float rotationDiff = MathHelper.wrapDegrees(serverYaw - clientYaw);
                 float sinYaw = MathHelper.sin(rotationDiff * ((float)Math.PI / 180F));
                 float cosYaw = MathHelper.cos(rotationDiff * ((float)Math.PI / 180F));
 
