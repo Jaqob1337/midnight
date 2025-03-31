@@ -22,6 +22,7 @@
 		"VelocityMixin",
 		"MovementFixMixin",
 		"EntityAccessor",
+		"ScaffoldInputMixin",
 		"ScaffoldSafeWalkMixin"
 	],
 	"injectors": {

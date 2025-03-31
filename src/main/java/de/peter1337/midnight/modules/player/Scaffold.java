@@ -1,5 +1,6 @@
 package de.peter1337.midnight.modules.player;
 
+import de.peter1337.midnight.Midnight;
 import de.peter1337.midnight.handler.RotationHandler;
 import de.peter1337.midnight.modules.Category;
 import de.peter1337.midnight.modules.Module;
@@ -55,7 +56,7 @@ public class Scaffold extends Module {
     );
 
     private final Setting<Boolean> moveFix = register(
-            new Setting<>("MoveFix", Boolean.TRUE, "Corrects rotation and movement direction during scaffolding (always reverses movement)")
+            new Setting<>("MoveFix", Boolean.TRUE, "Reverses movement direction during scaffolding")
                     .dependsOn(rotations)
     );
 
@@ -83,11 +84,6 @@ public class Scaffold extends Module {
             new Setting<>("MaxReach", 4.5f, 3.0f, 6.0f, "Maximum reach distance for block placement")
     );
 
-    // Track the original movement inputs for the direct movement fix
-    private float originalForward = 0f;
-    private float originalSideways = 0f;
-    private boolean movementModified = false;
-
     public Scaffold() {
         super("Scaffold", "Places blocks under you", Category.PLAYER, "m");
     }
@@ -96,7 +92,6 @@ public class Scaffold extends Module {
     public void onEnable() {
         lastPlacedPos = null;
         rotationsSet = false;
-        movementModified = false;
     }
 
     @Override
@@ -104,82 +99,7 @@ public class Scaffold extends Module {
         RotationHandler.cancelRotationByPriority(ROTATION_PRIORITY);
         if (mc.player != null) {
             mc.options.sneakKey.setPressed(false); // Ensure sneak is off
-
-            // Restore movement inputs if they were modified
-            if (movementModified) {
-                restoreMovement();
-            }
         }
-    }
-
-    /**
-     * Apply movement fix that DIRECTLY OVERRIDES movement based on key presses
-     * This completely bypasses the normal movement system
-     */
-    private void applyMovementFix() {
-        if (!moveFix.getValue() || mc.player == null) return;
-
-        // Store original movement values if we haven't already
-        if (!movementModified) {
-            originalForward = mc.player.input.movementForward;
-            originalSideways = mc.player.input.movementSideways;
-
-            // Get the raw keyboard state directly from LWJGL/Minecraft options
-            boolean wPressed = mc.options.forwardKey.isPressed();
-            boolean sPressed = mc.options.backKey.isPressed();
-            boolean aPressed = mc.options.leftKey.isPressed();
-            boolean dPressed = mc.options.rightKey.isPressed();
-
-            // COMPLETELY INVERT ALL DIRECTIONS:
-            // - W key becomes BACKWARDS (negative value)
-            // - S key becomes FORWARDS (positive value)
-            // - A key becomes RIGHT (negative value)
-            // - D key becomes LEFT (positive value)
-
-            // Clear any existing movement values first
-            mc.player.input.movementForward = 0.0f;
-            mc.player.input.movementSideways = 0.0f;
-
-            // Forward/backward movement
-            if (wPressed && !sPressed) {
-                // W key: force -1.0 (backward)
-                mc.player.input.movementForward = -1.0f;
-            } else if (sPressed && !wPressed) {
-                // S key: force +1.0 (forward)
-                mc.player.input.movementForward = 1.0f;
-            }
-
-            // Left/right movement
-            if (aPressed && !dPressed) {
-                // A key: force -1.0 (right)
-                mc.player.input.movementSideways = -1.0f;
-            } else if (dPressed && !aPressed) {
-                // D key: force +1.0 (left)
-                mc.player.input.movementSideways = 1.0f;
-            }
-
-            // Very important debug info
-            System.out.println("[Scaffold] DIRECT KEY OVERRIDE: Keys W=" + wPressed + " S=" + sPressed +
-                    " A=" + aPressed + " D=" + dPressed +
-                    " → Set forward=" + mc.player.input.movementForward +
-                    ", sideways=" + mc.player.input.movementSideways);
-
-            // Tell the RotationHandler to completely skip any further transformations
-            RotationHandler.setMoveFixContext("scaffold_direct_100");
-
-            movementModified = true;
-        }
-    }
-
-    /**
-     * Restore original movement inputs
-     */
-    private void restoreMovement() {
-        if (!movementModified || mc.player == null) return;
-
-        mc.player.input.movementForward = originalForward;
-        mc.player.input.movementSideways = originalSideways;
-        movementModified = false;
     }
 
     /**
@@ -187,12 +107,6 @@ public class Scaffold extends Module {
      */
     public void preUpdate() {
         if (!isEnabled() || mc.player == null || mc.world == null) return;
-
-        // First, apply the movement fix for WASD keys - do this BEFORE any other logic
-        // This makes W feel like forward even though we're building backward
-        if (moveFix.getValue()) {
-            applyMovementFix();
-        }
 
         // Handle safe walk (sneaking at edges)
         handleSafeWalk();
@@ -215,7 +129,7 @@ public class Scaffold extends Module {
 
             // Check if we can place a block now
             if (canPlaceNow() && hasBlocks()) {
-                // Perform the placement (no need to apply movement fix again)
+                // Perform the placement
                 placeBlock(placement);
 
                 // Handle tower jumping
@@ -232,97 +146,7 @@ public class Scaffold extends Module {
 
     @Override
     public void onUpdate() {
-        // Run another direct movement fix in the main update to ensure it sticks
-        // This is a failsafe in case something else modifies movement values
-        if (isEnabled() && moveFix.getValue() && mc.player != null && movementModified) {
-            // Get the raw keyboard state again
-            boolean wPressed = mc.options.forwardKey.isPressed();
-            boolean sPressed = mc.options.backKey.isPressed();
-            boolean aPressed = mc.options.leftKey.isPressed();
-            boolean dPressed = mc.options.rightKey.isPressed();
-
-            // Re-apply our overrides to ensure they stick
-            if (wPressed && !sPressed) {
-                mc.player.input.movementForward = -1.0f;
-            } else if (sPressed && !wPressed) {
-                mc.player.input.movementForward = 1.0f;
-            } else {
-                mc.player.input.movementForward = 0.0f;
-            }
-
-            if (aPressed && !dPressed) {
-                mc.player.input.movementSideways = -1.0f;
-            } else if (dPressed && !aPressed) {
-                mc.player.input.movementSideways = 1.0f;
-            } else {
-                mc.player.input.movementSideways = 0.0f;
-            }
-        }
-    }
-
-    /**
-     * Determines the direction the player is moving based on input
-     * @return The direction of movement, or null if not moving
-     */
-    private Direction determineMovementDirection() {
-        if (mc.player == null) return null;
-
-        // Get the input values
-        float forward = mc.player.input.movementForward;
-        float sideways = mc.player.input.movementSideways;
-
-        // If not moving, return null
-        if (Math.abs(forward) < 0.1f && Math.abs(sideways) < 0.1f) {
-            return null;
-        }
-
-        // Get the player's looking direction (yaw)
-        float yaw = mc.player.getYaw();
-
-        // Adjust yaw based on input direction
-        // This is standard Minecraft movement logic
-        if (forward < 0) {
-            yaw += 180; // Backward = opposite direction
-        }
-        if (sideways > 0) { // Right
-            yaw -= 90 * (forward == 0 ? 1 : Math.abs(forward) / forward * 0.5f);
-        } else if (sideways < 0) { // Left
-            yaw += 90 * (forward == 0 ? 1 : Math.abs(forward) / forward * 0.5f);
-        }
-
-        // Convert adjusted yaw to a direction
-        return getHorizontalDirection(yaw);
-    }
-
-    /**
-     * Determines the bridge direction based on block placement
-     */
-    private Direction getBridgeDirectionFromPlacement(PlacementInfo placement) {
-        if (mc.player == null) return Direction.SOUTH;
-
-        // Extract placement direction vector
-        Vec3d placeVec = new Vec3d(
-                placement.targetPos.getX() - mc.player.getX(),
-                0,
-                placement.targetPos.getZ() - mc.player.getZ()
-        );
-
-        // If the vector is too small, use player's facing
-        if (placeVec.lengthSquared() < 0.01) {
-            return getHorizontalDirection(mc.player.getYaw());
-        }
-
-        // Normalize the vector
-        if (placeVec.lengthSquared() > 0) {
-            placeVec = placeVec.normalize();
-        }
-
-        // Convert vector to direction
-        if (Math.abs(placeVec.x) > Math.abs(placeVec.z)) {
-            return placeVec.x > 0 ? Direction.EAST : Direction.WEST;
-        } else {
-            return placeVec.z > 0 ? Direction.SOUTH : Direction.NORTH;
-        }
+        // No need for additional logic here - the mixin handles the input reversal
     }
 
     /**
@@ -529,11 +353,11 @@ public class Scaffold extends Module {
         boolean isBody = rotationMode.getValue().equals("Body");
         boolean useMoveFix = (isSilent || isBody) && moveFix.getValue();
 
-        // Set the move fix context to "scaffold" for improved movement transformation
+        // Set the move fix context
         if (useMoveFix) {
             try {
-                // Try to use the new method, but handle if it's not implemented yet
-                RotationHandler.setMoveFixContext("scaffold_reversed");
+                // Tell rotation handler to use our special context
+                RotationHandler.setMoveFixContext("scaffold_direct_100");
             } catch (Exception e) {
                 // Silently ignore if the method doesn't exist yet
             }
@@ -611,6 +435,13 @@ public class Scaffold extends Module {
      */
     public boolean isSprintAllowed() {
         return false; // Disable sprint while scaffolding for more legit movement
+    }
+
+    /**
+     * Exposes the MoveFix setting for the mixin to check
+     */
+    public boolean isMovingFixEnabled() {
+        return isEnabled() && moveFix.getValue();
     }
 
     /**

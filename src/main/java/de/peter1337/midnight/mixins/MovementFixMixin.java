@@ -87,10 +87,6 @@ public abstract class MovementFixMixin {
                 float newForward = midnight_originalForward;
                 float newSideways = midnight_originalSideways;
 
-                // Debug log to confirm we're using this special case
-                Midnight.LOGGER.info("[Scaffold] 100% DIRECT MOVEMENT CONTROL ACTIVE: " +
-                        "forward=" + newForward + ", sideways=" + newSideways);
-
                 // IMPORTANT: Make sure these values aren't modified anywhere else by skipping any further processing
                 input.movementForward = newForward;
                 input.movementSideways = newSideways;
@@ -111,8 +107,6 @@ public abstract class MovementFixMixin {
                 newForward = midnight_originalForward;
                 newSideways = midnight_originalSideways;
 
-                // Debug output for verification
-                Midnight.LOGGER.debug("Using scaffold_direct context: using direct key-based values");
             }
             // Special handling for scaffold_reversed context
             else if (moveFixContext != null && moveFixContext.equalsIgnoreCase("scaffold_reversed")) {
@@ -121,8 +115,6 @@ public abstract class MovementFixMixin {
                 newForward = midnight_originalForward;
                 newSideways = midnight_originalSideways;
 
-                // Debug output for verification
-                Midnight.LOGGER.debug("Using scaffold_reversed context: keeping inverted values");
             }
             // For scaffold, use a special case with custom handling
             else if (moveFixContext != null && moveFixContext.equalsIgnoreCase("scaffold")) {
@@ -149,9 +141,6 @@ public abstract class MovementFixMixin {
 
                 // Debug log for scaffold
                 if (Math.abs(midnight_originalForward) > 0.1f || Math.abs(midnight_originalSideways) > 0.1f) {
-                    Midnight.LOGGER.debug("Enhanced Scaffold MoveFix: angle=" + angleToForward +
-                            "°, fwd=" + midnight_originalForward + "->" + newForward +
-                            ", side=" + midnight_originalSideways + "->" + newSideways);
                 }
             } else {
                 // Standard movement transformation using rotation matrices
@@ -166,9 +155,6 @@ public abstract class MovementFixMixin {
                 // Debug log for significant rotation differences
                 if (Math.abs(rotationDiff) > 30 &&
                         (Math.abs(midnight_originalForward) > 0.1f || Math.abs(midnight_originalSideways) > 0.1f)) {
-                    Midnight.LOGGER.debug("Standard MoveFix: diff=" + rotationDiff +
-                            "°, fwd=" + midnight_originalForward + "->" + newForward +
-                            ", side=" + midnight_originalSideways + "->" + newSideways);
                 }
             }
 
@@ -181,7 +167,6 @@ public abstract class MovementFixMixin {
 
         } catch (Exception e) {
             // Log any errors so the game doesn't crash
-            Midnight.LOGGER.error("Error in MovementFixMixin: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -220,7 +205,6 @@ public abstract class MovementFixMixin {
 
         } catch (Exception e) {
             // Log any errors
-            Midnight.LOGGER.error("Error in MovementFixMixin (restore): " + e.getMessage());
             e.printStackTrace();
         }
     }
