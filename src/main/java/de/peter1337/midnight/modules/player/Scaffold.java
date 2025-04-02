@@ -58,6 +58,14 @@ public class Scaffold extends Module {
     private static final long PATTERN_BREAK_INTERVAL = 2500; // ms
     private int consecutivePlacements = 0;
 
+    // NEW: Placement attempt tracking
+    private boolean lastPlacementSuccessful = false;
+    private boolean placementAttempted = false;
+    private long failedPlacementTime = 0;
+    private static final long FAILED_PLACEMENT_COOLDOWN = 500; // 500ms cooldown after failed placement
+    private int placementFailCount = 0;
+    private static final int MAX_CONSECUTIVE_FAILURES = 3;
+
     // Settings
     private final Setting<Boolean> rotations = register(
             new Setting<>("Rotations", Boolean.TRUE, "Look towards block placement position")
@@ -108,7 +116,7 @@ public class Scaffold extends Module {
     );
 
     private final Setting<Float> delay = register(
-            new Setting<>("Delay", 0.05f, 0.0f, 0.5f, "Delay between placements (seconds)")
+            new Setting<>("Delay", 0.25f, 0.15f, 1.0f, "Delay between placements (seconds)")
     );
 
     private final Setting<Float> delayRandomization = register(
@@ -139,6 +147,10 @@ public class Scaffold extends Module {
             new Setting<>("AntiDuplicate", Boolean.TRUE, "Prevent duplicate rotations to avoid detection")
     );
 
+    private final Setting<Boolean> preventSpamPlace = register(
+            new Setting<>("PreventSpamPlace", Boolean.TRUE, "Prevents attempting to place blocks repeatedly in the same spot")
+    );
+
     // Track the original movement inputs for the direct movement fix
     private float originalForward = 0f;
     private float originalSideways = 0f;
@@ -162,6 +174,10 @@ public class Scaffold extends Module {
         lastYawUpdateTime = 0;
         lastPitchUpdateTime = 0;
         endGracePeriod();
+        lastPlacementSuccessful = false;
+        placementAttempted = false;
+        failedPlacementTime = 0;
+        placementFailCount = 0;
     }
 
     @Override
@@ -308,6 +324,22 @@ public class Scaffold extends Module {
 
         // Try to find a placement position
         PlacementInfo placement = findPlacement();
+
+        // Check if the target position already has a block
+        if (placement != null && preventSpamPlace.getValue()) {
+            BlockPos targetPos = placement.targetPos;
+            BlockState state = mc.world.getBlockState(targetPos);
+            if (!state.isAir()) {
+                // There's already a block here, no need to place
+                lastPlacementSuccessful = true;
+                placementAttempted = false;
+                lastPlacedPos = targetPos;
+                placementFailCount = 0;
+                resetGracePeriod();
+                return;
+            }
+        }
+
         if (placement != null) {
             // Apply rotation for block placement - using calculations with randomization
             if (rotations.getValue()) {
@@ -319,6 +351,18 @@ public class Scaffold extends Module {
 
                 // Apply rotations for placement
                 handleRotations(targetYaw, placePitch);
+            }
+
+            // Check if we've attempted too many failed placements in a row
+            if (preventSpamPlace.getValue() && placementFailCount >= MAX_CONSECUTIVE_FAILURES) {
+                // Force a longer cooldown period for anti-spam measure
+                long currentTime = System.currentTimeMillis();
+                if (currentTime - failedPlacementTime < FAILED_PLACEMENT_COOLDOWN * 3) {
+                    return; // Skip placement until the extended cooldown passes
+                } else {
+                    // Reset fail count and try again after extended cooldown
+                    placementFailCount = 0;
+                }
             }
 
             // Check if we can place a block now - with human timing patterns
@@ -422,6 +466,15 @@ public class Scaffold extends Module {
     private void endGracePeriod() {
         inGracePeriod = false;
         consecutivePlacements = 0;
+    }
+
+    /**
+     * Reset the grace period timer without activating it
+     */
+    private void resetGracePeriod() {
+        inGracePeriod = false;
+        consecutivePlacements = 0;
+        graceEndTime = 0;
     }
 
     /**
@@ -547,6 +600,13 @@ public class Scaffold extends Module {
      */
     private boolean canPlaceNow() {
         long currentTime = System.currentTimeMillis();
+
+        // If we recently had a failed placement and preventSpamPlace is enabled, apply a cooldown
+        if (preventSpamPlace.getValue() && !lastPlacementSuccessful &&
+                placementAttempted && currentTime - failedPlacementTime < FAILED_PLACEMENT_COOLDOWN) {
+            return false;
+        }
+
         float baseDelay = delay.getValue() * 1000; // Convert to milliseconds
 
         // Add extra delay if towering
@@ -568,8 +628,8 @@ public class Scaffold extends Module {
         actualDelay += blockPlacementJitter;
         blockPlacementJitter = (long)(random.nextFloat() * 80) - 40;
 
-        // Make sure delay isn't negative
-        actualDelay = Math.max(20, actualDelay);
+        // Make sure delay isn't negative, enforce a minimum of 150ms for anti-cheat safety
+        actualDelay = Math.max(150, actualDelay);
 
         return currentTime - lastPlaceTime >= actualDelay;
     }
@@ -857,7 +917,14 @@ public class Scaffold extends Module {
 
         // Find and select a block
         int blockSlot = findBlockInHotbar();
-        if (blockSlot == -1) return;
+        if (blockSlot == -1) {
+            // Update placement attempt tracking
+            lastPlacementSuccessful = false;
+            placementAttempted = true;
+            failedPlacementTime = System.currentTimeMillis();
+            placementFailCount++;
+            return;
+        }
 
         int prevSlot = mc.player.getInventory().selectedSlot;
 
@@ -923,9 +990,23 @@ public class Scaffold extends Module {
             mc.player.getInventory().selectedSlot = prevSlot;
         }
 
-        // Update timer and last placed position
+        // Update placement attempt tracking
         lastPlaceTime = System.currentTimeMillis();
-        lastPlacedPos = placement.targetPos;
+        placementAttempted = true;
+
+        // Check if the block place was successful by seeing if the block is different after placement
+        BlockState afterState = mc.world.getBlockState(placement.targetPos);
+        boolean success = !afterState.isAir();
+
+        if (success) {
+            placementFailCount = 0;
+            lastPlacementSuccessful = true;
+            lastPlacedPos = placement.targetPos;
+        } else {
+            lastPlacementSuccessful = false;
+            failedPlacementTime = System.currentTimeMillis();
+            placementFailCount++;
+        }
     }
 
     /**
