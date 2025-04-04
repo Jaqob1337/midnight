@@ -66,6 +66,9 @@ public class Scaffold extends Module {
     private int placementFailCount = 0;
     private static final int MAX_CONSECUTIVE_FAILURES = 3;
 
+    // Track rotation timing for server sync
+    private long lastRotationTime = 0;
+
     // Settings
     private final Setting<Boolean> rotations = register(
             new Setting<>("Rotations", Boolean.TRUE, "Look towards block placement position")
@@ -151,6 +154,11 @@ public class Scaffold extends Module {
             new Setting<>("PreventSpamPlace", Boolean.TRUE, "Prevents attempting to place blocks repeatedly in the same spot")
     );
 
+    // NEW: Added reliable placement setting
+    private final Setting<Boolean> reliablePlacement = register(
+            new Setting<>("ReliablePlacement", Boolean.TRUE, "Prioritizes reliable placements over speed")
+    );
+
     // Track the original movement inputs for the direct movement fix
     private float originalForward = 0f;
     private float originalSideways = 0f;
@@ -178,6 +186,7 @@ public class Scaffold extends Module {
         placementAttempted = false;
         failedPlacementTime = 0;
         placementFailCount = 0;
+        lastRotationTime = 0;
     }
 
     @Override
@@ -249,8 +258,14 @@ public class Scaffold extends Module {
             mc.player.input.movementForward = newForward;
             mc.player.input.movementSideways = newSideways;
 
-            // Use "scaffold" context for improved handling
-            RotationHandler.setMoveFixContext("scaffold");
+            // Use appropriate move fix context
+            if (isTowering) {
+                // For tower, use direct context for more predictable movement
+                RotationHandler.setMoveFixContext("scaffold_direct_100");
+            } else {
+                // For regular scaffolding, use standard context
+                RotationHandler.setMoveFixContext("scaffold");
+            }
 
             movementModified = true;
         }
@@ -288,18 +303,18 @@ public class Scaffold extends Module {
             applyMovementFix();
         }
 
+        // Track rotation timing for synchronization
+        long currentTime = System.currentTimeMillis();
+        boolean hasStableRotation = (currentTime - lastRotationTime > 50);
+
         // Detect towering (building straight up)
-        isTowering = mc.options.jumpKey.isPressed() && mc.player.isOnGround();
+        isTowering = tower.getValue() && mc.options.jumpKey.isPressed() && mc.player.isOnGround();
 
         // Set bridging direction based on whether we're towering or not
         if (isTowering) {
-            // When towering, we need variable rotations to avoid detection
-            // Don't use fixed direction when going up
-            bridgeDirection = getRandomHorizontalDirection();
-            targetYaw = getRandomizedYaw();
-
-            // Use more vertical pitch when towering
-            targetPitch = 85f + (random.nextFloat() * 3f - 1.5f);
+            // When towering, use a fixed direction, and more stable pitch
+            targetYaw = mc.player.getYaw(); // Use current yaw for tower
+            targetPitch = 89.5f; // Very precise look down for reliability
         } else {
             // Normal scaffolding
             bridgeDirection = getHorizontalDirection(mc.player.getYaw());
@@ -325,6 +340,13 @@ public class Scaffold extends Module {
         // Try to find a placement position
         PlacementInfo placement = findPlacement();
 
+        // Try specialized tower placement if in tower mode and normal placement failed or returned a block that's already placed
+        if (isTowering && (placement == null || (placement != null &&
+                !mc.world.getBlockState(placement.targetPos).isAir()))) {
+            // Try direct placement below player for tower
+            placement = findDirectPlacementUnder();
+        }
+
         // Check if the target position already has a block
         if (placement != null && preventSpamPlace.getValue()) {
             BlockPos targetPos = placement.targetPos;
@@ -343,25 +365,55 @@ public class Scaffold extends Module {
         if (placement != null) {
             // Apply rotation for block placement - using calculations with randomization
             if (rotations.getValue()) {
-                float[] placeAngles = calculateRotation(placement.hitVec);
-                float placePitch = placeAngles[1];
+                // Use different rotation speeds and strategies based on tower mode
+                float effectiveRotationSpeed;
+                float effectivePitch;
 
-                // Add randomized pitch
-                placePitch = getRandomizedPitch(placePitch);
+                if (isTowering) {
+                    // Use slower, more precise rotations for tower mode
+                    effectiveRotationSpeed = reliablePlacement.getValue() ? 1.0f : rotationSpeed.getValue() * 0.9f;
+                    effectivePitch = targetPitch; // Use stable pitch for tower
+
+                    // Very minimal randomization for tower
+                    if (!reliablePlacement.getValue() && random.nextFloat() > 0.9f) {
+                        effectivePitch += (random.nextFloat() - 0.5f) * 0.5f;
+                    }
+                } else {
+                    // Normal bridge mode - can be more variable
+                    effectiveRotationSpeed = rotationSpeed.getValue();
+                    float[] placeAngles = calculateRotation(placement.hitVec);
+                    effectivePitch = placeAngles[1];
+
+                    // Add randomized pitch
+                    if (!reliablePlacement.getValue()) {
+                        effectivePitch = getRandomizedPitch(effectivePitch);
+                    }
+                }
 
                 // Apply rotations for placement
-                handleRotations(targetYaw, placePitch);
+                handleRotations(targetYaw, effectivePitch, effectiveRotationSpeed);
+
+                // Important: Track when we set rotations
+                lastRotationTime = System.currentTimeMillis();
             }
 
             // Check if we've attempted too many failed placements in a row
             if (preventSpamPlace.getValue() && placementFailCount >= MAX_CONSECUTIVE_FAILURES) {
                 // Force a longer cooldown period for anti-spam measure
-                long currentTime = System.currentTimeMillis();
-                if (currentTime - failedPlacementTime < FAILED_PLACEMENT_COOLDOWN * 3) {
+                long cooldownTime = System.currentTimeMillis();
+                if (cooldownTime - failedPlacementTime < FAILED_PLACEMENT_COOLDOWN * 3) {
                     return; // Skip placement until the extended cooldown passes
                 } else {
                     // Reset fail count and try again after extended cooldown
                     placementFailCount = 0;
+                }
+            }
+
+            // In tower or reliable mode, ensure rotation is stable before placing
+            if (isTowering || reliablePlacement.getValue()) {
+                // Wait for rotation to stabilize if it was recently changed
+                if (!hasStableRotation && rotations.getValue()) {
+                    return;
                 }
             }
 
@@ -374,21 +426,27 @@ public class Scaffold extends Module {
                 if (tower.getValue() && mc.options.jumpKey.isPressed() && mc.player.isOnGround()) {
                     // Add small delay for more human-like behavior
                     if (!humanPatterns.getValue() || random.nextFloat() > 0.2f) {
-                        // Variable jump height for towering
-                        mc.player.jump();
+                        // Only jump if the placement was successful
+                        if (lastPlacementSuccessful) {
+                            // Variable jump height for towering
+                            mc.player.jump();
 
-                        // Apply a small boost based on tower speed
-                        if (towerSpeed.getValue() > 0.2f) {
-                            float boost = towerSpeed.getValue() * 0.05f;
-                            if (humanPatterns.getValue()) {
-                                boost *= 0.9f + random.nextFloat() * 0.2f;
+                            // Apply a small boost based on tower speed
+                            if (towerSpeed.getValue() > 0.2f) {
+                                float boost = towerSpeed.getValue() * 0.05f;
+                                if (humanPatterns.getValue()) {
+                                    boost *= 0.9f + random.nextFloat() * 0.2f;
+                                }
+                                mc.player.addVelocity(0, boost, 0);
                             }
-                            mc.player.addVelocity(0, boost, 0);
-                        }
 
-                        // With avoidAir, we want to place another block quickly after jump
-                        if (avoidAir.getValue()) {
-                            blockPlacementJitter = -100; // Negative to make next placement happen sooner
+                            // With avoidAir, we want to place another block quickly after jump
+                            if (avoidAir.getValue()) {
+                                blockPlacementJitter = -100; // Negative to make next placement happen sooner
+                            }
+                        } else if (isTowering && placementFailCount > 0) {
+                            // Add extra delay after failed placement in tower mode
+                            blockPlacementJitter = 150; // Add extra delay after failed placement
                         }
                     } else {
                         // Occasional short delay before jumping to appear more human
@@ -397,7 +455,7 @@ public class Scaffold extends Module {
                                 Thread.sleep(30 + random.nextInt(50));
                                 mc.execute(() -> {
                                     if (isEnabled() && mc.player != null &&
-                                            tower.getValue() && mc.options.jumpKey.isPressed()) {
+                                            tower.getValue() && mc.options.jumpKey.isPressed() && lastPlacementSuccessful) {
                                         mc.player.jump();
                                     }
                                 });
@@ -417,8 +475,43 @@ public class Scaffold extends Module {
         } else if (rotations.getValue()) {
             // Even if no placement is needed, still apply the rotations
             // This is important for consistent behavior
-            handleRotations(targetYaw, getRandomizedPitch(targetPitch));
+            handleRotations(targetYaw, getRandomizedPitch(targetPitch), rotationSpeed.getValue());
         }
+    }
+
+    /**
+     * Special method to find a direct placement under the player for tower mode
+     */
+    private PlacementInfo findDirectPlacementUnder() {
+        if (mc.player == null || mc.world == null) return null;
+
+        // Get the position directly under the player
+        BlockPos pos = new BlockPos(
+                MathHelper.floor(mc.player.getX()),
+                MathHelper.floor(mc.player.getY() - 0.5),
+                MathHelper.floor(mc.player.getZ())
+        );
+
+        // Check if the position is valid
+        if (!mc.world.getBlockState(pos).isAir()) {
+            return null; // Already a block here
+        }
+
+        // Check the block below to place against
+        BlockPos supportPos = pos.down();
+        BlockState supportState = mc.world.getBlockState(supportPos);
+        if (supportState.isAir() || !supportState.isSolidBlock(mc.world, supportPos)) {
+            return null; // Can't place against air or non-solid block
+        }
+
+        // Create direct placement info
+        Vec3d hitVec = new Vec3d(
+                pos.getX() + 0.5,
+                pos.getY(),
+                pos.getZ() + 0.5
+        );
+
+        return new PlacementInfo(pos, supportPos, Direction.UP, hitVec);
     }
 
     /**
@@ -631,11 +724,17 @@ public class Scaffold extends Module {
         // Make sure delay isn't negative, enforce a minimum of 150ms for anti-cheat safety
         actualDelay = Math.max(150, actualDelay);
 
+        // For reliable placement, use a more consistent delay with tower mode
+        if (reliablePlacement.getValue() && isTowering) {
+            actualDelay = Math.max(actualDelay, 200); // Minimum 200ms for tower mode
+        }
+
         return currentTime - lastPlaceTime >= actualDelay;
     }
 
     /**
      * Improved placement finding with better reliability
+     * Uses both RayCastUtil and direct methods for better results
      */
     private PlacementInfo findPlacement() {
         if (mc.player == null || mc.world == null) return null;
@@ -651,6 +750,15 @@ public class Scaffold extends Module {
         // First check if we need to place a block
         if (!mc.world.getBlockState(basePos).isAir()) {
             return null; // Already a block here
+        }
+
+        // Use additional checks for tower mode
+        if (isTowering && tower.getValue()) {
+            // In tower mode, first try direct placement for stability
+            PlacementInfo directInfo = getDirectPlacement(basePos);
+            if (directInfo != null) {
+                return directInfo;
+            }
         }
 
         // Try using RayCastUtil to find the best placement
@@ -734,6 +842,23 @@ public class Scaffold extends Module {
 
         // If RayCastUtil fails, fall back to the original method
         return findPlacementLegacy(basePos);
+    }
+
+    /**
+     * Direct placement method for tower mode
+     */
+    private PlacementInfo getDirectPlacement(BlockPos pos) {
+        if (mc.world.getBlockState(pos).isAir()) {
+            BlockPos downPos = pos.down();
+            BlockState downState = mc.world.getBlockState(downPos);
+
+            if (!downState.isAir() && downState.isSolidBlock(mc.world, downPos)) {
+                // Calculate a stable hit vector for direct placement
+                Vec3d hitVec = Vec3d.ofCenter(downPos).add(0, 0.5, 0);
+                return new PlacementInfo(pos, downPos, Direction.UP, hitVec);
+            }
+        }
+        return null;
     }
 
     /**
@@ -829,13 +954,13 @@ public class Scaffold extends Module {
     /**
      * Handles the rotation to place a block with improved humanization
      */
-    private void handleRotations(float yaw, float pitch) {
+    private void handleRotations(float yaw, float pitch, float speed) {
         boolean isSilent = rotationMode.getValue().equals("Silent");
         boolean isBody = rotationMode.getValue().equals("Body");
         boolean useMoveFix = (isSilent || isBody) && moveFix.getValue();
 
-        // Add rotation noise if enabled
-        if (randomYawRange.getValue() > 0) {
+        // Add rotation noise if enabled and not in reliable placement mode
+        if (randomYawRange.getValue() > 0 && !reliablePlacement.getValue() && !isTowering) {
             float yawNoise = (random.nextFloat() * 2.0f - 1.0f) * randomYawRange.getValue();
             yaw += yawNoise;
         }
@@ -855,15 +980,24 @@ public class Scaffold extends Module {
 
         // Set the move fix context for improved movement transformation
         if (useMoveFix) {
-            RotationHandler.setMoveFixContext("scaffold");
+            // Improved context handling for tower mode vs normal bridging
+            if (isTowering) {
+                RotationHandler.setMoveFixContext("scaffold_direct_100");
+            } else {
+                RotationHandler.setMoveFixContext("scaffold");
+            }
         }
 
         // Variable hold time with randomization for human-like behavior (100-220ms)
         long holdTime = 100 + (humanPatterns.getValue() ? random.nextInt(120) : 0);
 
+        // For tower mode or reliable placement, use longer hold time to ensure server gets the rotation
+        if (isTowering || reliablePlacement.getValue()) {
+            holdTime += 50; // Add 50ms to hold time for tower mode
+        }
+
         // Use proper rotation speed parameter for smoothness
-        float speed = rotationSpeed.getValue();
-        if (humanPatterns.getValue() && random.nextFloat() > 0.85) {
+        if (humanPatterns.getValue() && !reliablePlacement.getValue() && random.nextFloat() > 0.85) {
             // Occasionally vary rotation speed slightly
             speed *= 0.95f + random.nextFloat() * 0.1f;
         }
@@ -907,9 +1041,24 @@ public class Scaffold extends Module {
 
     /**
      * Places a block at the given position with human-like timing
+     * and improved verification
      */
     private void placeBlock(PlacementInfo placement) {
         if (mc.player == null || mc.interactionManager == null) return;
+
+        // IMPORTANT FIX: Check if server rotation is set and stable before placing
+        if (!RotationHandler.isRotationActive()) {
+            placementFailCount++;
+            return;
+        }
+
+        // When in tower mode or reliable placement mode, be extra careful with timing
+        if (isTowering || reliablePlacement.getValue()) {
+            long timeSinceRotation = System.currentTimeMillis() - lastRotationTime;
+            if (timeSinceRotation < 50) { // Wait at least 50ms for rotation to take effect
+                return;
+            }
+        }
 
         // Store the rotations used for placement
         lastPlacementYaw = RotationHandler.getServerYaw();
@@ -933,23 +1082,10 @@ public class Scaffold extends Module {
             mc.player.getInventory().selectedSlot = blockSlot;
         }
 
-        // Add more variation when towering
-        if (isTowering) {
-            // When building up, force a longer delay between placements
-            lastPlaceTime += random.nextInt(50) + 25;
-
-            // Add micro-delay before clicking when towering
+        // TOWER MODE IMPROVEMENT: Small delay before placement when towering
+        if ((isTowering || reliablePlacement.getValue()) && placementFailCount > 0) {
             try {
-                Thread.sleep(random.nextInt(30) + 10);
-            } catch (InterruptedException e) {
-                // Ignore
-            }
-        }
-
-        // Add small humanizing delay before placement occasionally
-        if (humanPatterns.getValue() && random.nextFloat() > 0.9) {
-            try {
-                Thread.sleep(random.nextInt(20) + 5);
+                Thread.sleep(random.nextInt(15) + 10); // 10-25ms delay for better reliability
             } catch (InterruptedException e) {
                 // Ignore
             }
@@ -957,7 +1093,7 @@ public class Scaffold extends Module {
 
         // Create the block hit result with small randomization to appear more human
         Vec3d hitVec = placement.hitVec;
-        if (humanPatterns.getValue() && random.nextFloat() > 0.8) {
+        if (humanPatterns.getValue() && !reliablePlacement.getValue() && random.nextFloat() > 0.8) {
             // Small random variations in hit position
             hitVec = hitVec.add(
                     (random.nextDouble() - 0.5) * 0.001,
@@ -973,6 +1109,9 @@ public class Scaffold extends Module {
                 false
         );
 
+        // IMPORTANT FIX: Store the current state for verification after placement
+        BlockState beforeState = mc.world.getBlockState(placement.targetPos);
+
         // Place the block
         mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hitResult);
         mc.player.swingHand(Hand.MAIN_HAND);
@@ -980,7 +1119,7 @@ public class Scaffold extends Module {
         // Reset slot if needed
         if (autoSwitch.getValue() && prevSlot != blockSlot) {
             // Add small humanizing delay occasionally before switching back
-            if (humanPatterns.getValue() && random.nextFloat() > 0.85) {
+            if (humanPatterns.getValue() && !reliablePlacement.getValue() && random.nextFloat() > 0.85) {
                 try {
                     Thread.sleep(random.nextInt(20) + 5);
                 } catch (InterruptedException e) {
@@ -994,18 +1133,33 @@ public class Scaffold extends Module {
         lastPlaceTime = System.currentTimeMillis();
         placementAttempted = true;
 
-        // Check if the block place was successful by seeing if the block is different after placement
-        BlockState afterState = mc.world.getBlockState(placement.targetPos);
-        boolean success = !afterState.isAir();
+        // IMPORTANT FIX: Wait a short time and verify the placement was successful
+        try {
+            // Small delay to allow the world to update (10-20ms)
+            int verifyDelay = isTowering || reliablePlacement.getValue() ? 15 : 10;
+            Thread.sleep(verifyDelay);
 
-        if (success) {
-            placementFailCount = 0;
-            lastPlacementSuccessful = true;
-            lastPlacedPos = placement.targetPos;
-        } else {
-            lastPlacementSuccessful = false;
-            failedPlacementTime = System.currentTimeMillis();
-            placementFailCount++;
+            // Check if the block place was successful by comparing states
+            BlockState afterState = mc.world.getBlockState(placement.targetPos);
+            boolean success = !afterState.equals(beforeState) && !afterState.isAir();
+
+            if (success) {
+                placementFailCount = 0;
+                lastPlacementSuccessful = true;
+                lastPlacedPos = placement.targetPos;
+            } else {
+                lastPlacementSuccessful = false;
+                failedPlacementTime = System.currentTimeMillis();
+                placementFailCount++;
+
+                // For tower mode, more aggressive handling of failures
+                if (isTowering && placementFailCount > 1) {
+                    // Add extra delay after consecutive failures in tower mode
+                    blockPlacementJitter = 150; // 150ms extra delay
+                }
+            }
+        } catch (InterruptedException e) {
+            // Just ignore interruption
         }
     }
 
