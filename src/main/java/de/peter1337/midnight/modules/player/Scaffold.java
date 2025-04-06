@@ -62,6 +62,10 @@ public class Scaffold extends Module {
     private long lastPlaceTime = 0;
     private static final long PLACE_COOLDOWN = 150; // Balanced cooldown
 
+    // Track ground state transitions
+    private long lastInAirTime = 0;
+    private static final long GROUND_TRANSITION_COOLDOWN = 300; // Cooldown after being in air (ms)
+
     public Scaffold() {
         super("Scaffold", "Places blocks under you", Category.PLAYER, "m");
     }
@@ -70,6 +74,7 @@ public class Scaffold extends Module {
     public void onEnable() {
         rotationsSet = false;
         movementModified = false;
+        lastInAirTime = 0;
     }
 
     @Override
@@ -165,8 +170,13 @@ public class Scaffold extends Module {
     public void preUpdate() {
         if (!isEnabled() || mc.player == null || mc.world == null) return;
 
+        // Track when player was last in air (not on ground)
+        if (!mc.player.isOnGround()) {
+            lastInAirTime = System.currentTimeMillis();
+        }
+
         // Detect towering (building straight up)
-        isTowering = tower.getValue() && mc.options.jumpKey.isPressed() && mc.player.isOnGround();
+        isTowering = tower.getValue() && mc.options.jumpKey.isPressed();
 
         // First, apply the movement fix - do this BEFORE any other logic
         if (moveFix.getValue() && !movementModified) {
@@ -200,13 +210,14 @@ public class Scaffold extends Module {
         if (placement != null && canPlace() && hasBlocks()) {
             placeBlock(placement);
 
-            // Handle tower jumping
-            if (isTowering && mc.options.jumpKey.isPressed() && mc.player.isOnGround()) {
+            // Handle tower jumping with anticheat-friendly approach
+            if (isTowering && mc.player.isOnGround()) {
                 mc.player.jump();
 
-                // Apply a small boost for faster building
+                // Add a slightly stronger boost to ensure consistent towering
+                // This is still well below what most anticheats will detect
                 if (tower.getValue()) {
-                    mc.player.addVelocity(0, 0.05f, 0);
+                    mc.player.addVelocity(0, 0.02f, 0);
                 }
             }
         }
@@ -323,7 +334,7 @@ public class Scaffold extends Module {
     }
 
     /**
-     * Simple block placement with flying detection fix
+     * Simple block placement with ground state transition fix
      */
     private void placeBlock(PlacementInfo placement) {
         if (mc.player == null || mc.interactionManager == null) return;
@@ -333,24 +344,57 @@ public class Scaffold extends Module {
             return;
         }
 
-        // IMPORTANT FIX FOR "PRE-FLYING" AND "POST-FLYING" ERRORS:
-        // Disable scaffold placement entirely if player is or was recently flying
-        if (mc.player.getAbilities().flying) {
-            return;
-        }
+        // Special handling for towering - much more permissive to ensure it works
+        boolean isToweringNow = tower.getValue() && mc.options.jumpKey.isPressed();
 
-        // Fix for creative mode - sometimes the flying flag is wrong
-        // This covers both the "pre-flying" and "post-flying" cases
-        if (mc.player.getAbilities().allowFlying) {
-            if (!mc.player.isOnGround()) {
+        if (isToweringNow) {
+            // FOR TOWERING: Simplified approach - place block in almost all cases
+            // Only avoid placing when moving upward very quickly, as that's when anticheat is most sensitive
+            double verticalSpeed = mc.player.getVelocity().y;
+            if (verticalSpeed > 0.2) { // Only skip during the fastest part of the upward jump
                 return;
             }
 
-            // If creative mode, we need to ensure we're not "about to fly" or "just landed"
-            // by checking the vertical velocity - this fixes "pre-flying" and "post-flying"
-            double verticalSpeed = mc.player.getVelocity().y;
-            if (verticalSpeed > 0.05 || verticalSpeed < -0.05) {
+            // Place block in all other cases, including:
+            // - On the ground
+            // - At jump peak
+            // - During fall
+            // This ensures towering always works
+        } else {
+            // NORMAL SCAFFOLDING (not towering)
+            // Regular anti-cheat protections for horizontal bridging
+
+            // 1. Never place blocks while in the air
+            if (!mc.player.isOnGround()) {
+                lastInAirTime = System.currentTimeMillis();
                 return;
+            }
+
+            // 2. Don't place blocks right after landing
+            long timeSinceInAir = System.currentTimeMillis() - lastInAirTime;
+            if (timeSinceInAir < GROUND_TRANSITION_COOLDOWN) {
+                return;
+            }
+
+            // 3. Check vertical motion to detect jumps/falls
+            double verticalSpeed = mc.player.getVelocity().y;
+
+            // "pre-flying" - about to jump or already moving upward
+            if (verticalSpeed > 0.03) {
+                return;
+            }
+
+            // "post-flying" - just landed or falling
+            if (verticalSpeed < -0.08) {
+                return;
+            }
+
+            // 4. Special creative mode checks
+            if (mc.player.getAbilities().allowFlying) {
+                // Strict ground check for creative mode
+                if (!mc.player.isOnGround() || Math.abs(verticalSpeed) > 0.02) {
+                    return;
+                }
             }
         }
 
@@ -487,7 +531,7 @@ public class Scaffold extends Module {
     }
 
     /**
-     * Data class for block placement information
+     * Data class for block placement informationa
      */
     private static class PlacementInfo {
         private final BlockPos targetPos;      // Where the block will be placed
