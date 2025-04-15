@@ -26,6 +26,10 @@ public class NotificationBlocker extends Module {
             new Setting<>("BlockStatusEffects", Boolean.TRUE, "Block status effect icons (potions) in the top-right corner")
     );
 
+    private final Setting<Boolean> blockResourcePacks = register(
+            new Setting<>("BlockResourcePacks", Boolean.TRUE, "Block server resource pack download prompts")
+    );
+
     public NotificationBlocker() {
         super("NotificationBlocker", "Blocks achievement and other notifications", Category.MISC, "n");
         Midnight.LOGGER.info("NotificationBlocker module initialized");
@@ -82,5 +86,14 @@ public class NotificationBlocker extends Module {
      */
     public boolean shouldBlockStatusEffects() {
         return isEnabled() && blockStatusEffects.getValue();
+    }
+
+    /**
+     * Gets whether server resource pack prompts should be blocked.
+     *
+     * @return true if resource pack prompts should be blocked
+     */
+    public boolean shouldBlockResourcePacks() {
+        return isEnabled() && blockResourcePacks.getValue();
     }
 }

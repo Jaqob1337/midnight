@@ -2,6 +2,7 @@ package de.peter1337.midnight.manager;
 
 import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.modules.combat.Aura;
+import de.peter1337.midnight.modules.movement.Fly;
 import de.peter1337.midnight.modules.movement.Speed;
 import de.peter1337.midnight.modules.movement.Sprint;
 import de.peter1337.midnight.modules.player.*;
@@ -30,6 +31,7 @@ public class ModuleManager {
         registerModule(new Speed());
         registerModule(new NoSlow());
         registerModule(new Scaffold());
+        registerModule(new Fly());
     }
 
     private static void registerModule(Module module) {

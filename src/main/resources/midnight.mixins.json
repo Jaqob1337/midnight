@@ -7,6 +7,8 @@
 		"AdvancementMixin",
 		"ChatMixin",
 		"ChatScreenAccessor",
+		"ServerResourcePackLoaderMixin",
+		"ResourcePackProviderMixin",
 		"EntityGlowingMixin",
 		"PlayerJoinMixin",
 		"AttackEntityMixin",

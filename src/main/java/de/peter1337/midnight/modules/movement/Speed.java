@@ -20,7 +20,7 @@ public class Speed extends Module {
     );
 
     // Consistent movement speed value
-    private static final double MOVE_SPEED = 0.2553;
+    private static final double MOVE_SPEED = 6.2553;
 
     // Track if the player is manually jumping
     private boolean isJumping = false;

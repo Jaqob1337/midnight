@@ -531,7 +531,7 @@ public class Scaffold extends Module {
     }
 
     /**
-     * Data class for block placement informationa
+     * Data class for block placement information
      */
     private static class PlacementInfo {
         private final BlockPos targetPos;      // Where the block will be placed
