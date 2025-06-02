@@ -5,6 +5,7 @@ import de.peter1337.midnight.modules.Category;
 import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.modules.Setting;
 import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.player.PlayerInventory;
@@ -12,539 +13,248 @@ import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.*;
+import net.minecraft.world.RaycastContext;
 import net.minecraft.world.World;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.util.math.Box;
 
+/**
+ * Legit Scaffold Module: Places a single block where the server-side crosshair is aimed.
+ */
 public class Scaffold extends Module {
     private final MinecraftClient mc = MinecraftClient.getInstance();
 
-    // Rotation management
-    private static final int ROTATION_PRIORITY = 80;
-    private boolean rotationsSet = false;
-    private Direction bridgeDirection = null;
-    private boolean isTowering = false;
-
-    // Settings
-    private final Setting<Boolean> rotations = register(
-            new Setting<>("Rotations", Boolean.TRUE, "Look towards block placement position")
-    );
-
-    private final Setting<String> rotationMode = register(
-            new Setting<>("RotationMode", "Silent",
-                    java.util.Arrays.asList("Silent", "Client", "Body"),
-                    "Silent: server-only, Client: visible, Body: shows on body only")
-                    .dependsOn(rotations)
-    );
-
-    private final Setting<Boolean> moveFix = register(
-            new Setting<>("MoveFix", Boolean.TRUE, "Corrects rotation and movement direction during scaffolding")
-                    .dependsOn(rotations)
-    );
-
-    private final Setting<Boolean> tower = register(
-            new Setting<>("Tower", Boolean.TRUE, "Jump automatically when holding space")
-    );
-
-    private final Setting<Boolean> autoSwitch = register(
-            new Setting<>("AutoSwitch", Boolean.TRUE, "Switch to blocks automatically")
-    );
-
-    private final Setting<Boolean> safeWalk = register(
-            new Setting<>("SafeWalk", Boolean.TRUE, "Prevents falling off edges")
-    );
-
-    // Track the original movement inputs for the movement fix
-    private float originalForward = 0f;
-    private float originalSideways = 0f;
-    private boolean movementModified = false;
-
-    // Cooldown system
+    // --- State & Cooldown ---
+    private boolean placedThisTick = false; // Prevent multiple placements per tick
     private long lastPlaceTime = 0;
-    private static final long PLACE_COOLDOWN = 150; // Balanced cooldown
+    private static final long PLACE_COOLDOWN = 50; // Minimum ms between placements
+    private static final double PLACEMENT_REACH = 4.5; // Max reach for placement
 
-    // Track ground state transitions
-    private long lastInAirTime = 0;
-    private static final long GROUND_TRANSITION_COOLDOWN = 300; // Cooldown after being in air (ms)
+    // --- Grim Bypass Related --- (Kept if needed for placement itself)
+    private long lastAirTime = 0;
+    private static final long GROUND_TRANSITION_COOLDOWN = 250;
+    private double lastVerticalVelocity = 0;
+    private int placementsThisTickCycle = 0; // For bypass limit setting
+    private long lastPlacementReset = 0;
+
+    // --- Settings ---
+    // Removed: rotations, moveFix, constantBackward, autoWalk
+    private final Setting<Boolean> tower = register(new Setting<>("Tower", Boolean.TRUE, "Jump automatically when holding space and looking down"));
+    private final Setting<Boolean> autoSwitch = register(new Setting<>("AutoSwitch", Boolean.TRUE, "Switch to blocks automatically"));
+    private final Setting<Boolean> safeWalk = register(new Setting<>("SafeWalk", Boolean.TRUE, "Prevents falling off edges by sneaking"));
+    private final Setting<Boolean> sprint = register(new Setting<>("AllowSprint", Boolean.FALSE, "Allow sprinting while active"));
+    private final Setting<Boolean> grimBypass = register(new Setting<>("GrimBypass", Boolean.TRUE, "Apply GrimAC bypasses to placement"));
+    private final Setting<Boolean> antiPreFlying = register(new Setting<>("AntiPreFlying", Boolean.TRUE, "Prevents placing blocks during jumps").dependsOn(grimBypass));
+    private final Setting<Boolean> placementLimit = register(new Setting<>("PlacementLimit", Boolean.TRUE, "Limits placements per tick cycle").dependsOn(grimBypass));
+    private final Setting<Float> delay = register(new Setting<>("Delay", 0.05f, 0.0f, 0.5f, "Min delay between placements (seconds)"));
 
     public Scaffold() {
-        super("Scaffold", "Places blocks under you", Category.PLAYER, "m");
+        super("Scaffold", "Places single blocks legitly", Category.PLAYER, "m");
     }
 
     @Override
     public void onEnable() {
-        rotationsSet = false;
-        movementModified = false;
-        lastInAirTime = 0;
+        placedThisTick = false;
+        lastPlaceTime = 0;
+        lastAirTime = 0;
+        lastVerticalVelocity = 0;
+        placementsThisTickCycle = 0;
+        lastPlacementReset = System.currentTimeMillis();
     }
 
     @Override
     public void onDisable() {
-        RotationHandler.cancelRotationByPriority(ROTATION_PRIORITY);
+        // Release keys if needed
         if (mc.player != null) {
-            mc.options.sneakKey.setPressed(false); // Ensure sneak is off
-
-            // Restore movement inputs if they were modified
-            if (movementModified) {
-                restoreMovement();
+            if (safeWalk.getValue() && mc.options.sneakKey.isPressed()) {
+                mc.options.sneakKey.setPressed(false);
             }
         }
-    }
-
-    /**
-     * Public accessor method for the movement fix setting
-     * Used by ScaffoldInputMixin to check if movement fix should be applied
-     */
-    public boolean isMovingFixEnabled() {
-        return isEnabled() && moveFix.getValue();
-    }
-
-    /**
-     * Apply movement fix with anti-detection improvements
-     */
-    private void applyMovementFix() {
-        if (!moveFix.getValue() || mc.player == null || mc.player.input == null) return;
-
-        // Store original movement values if we haven't already
-        if (!movementModified) {
-            originalForward = mc.player.input.movementForward;
-            originalSideways = mc.player.input.movementSideways;
-
-            // Early exit if not moving
-            if (Math.abs(originalForward) < 0.01f && Math.abs(originalSideways) < 0.01f) {
-                movementModified = true;
-                return;
-            }
-
-            // Get player's facing direction
-            bridgeDirection = getHorizontalDirection(mc.player.getYaw());
-            float targetYaw = getYawFromDirection(bridgeDirection.getOpposite());
-
-            // Calculate rotation difference with small variation to avoid detection
-            float lookYaw = mc.player.getYaw();
-            float rotationDiff = MathHelper.wrapDegrees(targetYaw - lookYaw);
-
-            // Add tiny variation to rotationDiff to avoid pattern detection
-            if (Math.random() > 0.7) {
-                rotationDiff += (float)(Math.random() * 0.2f - 0.1f);
-            }
-
-            // Apply transformation using rotation matrix
-            float sinYaw = MathHelper.sin(rotationDiff * ((float)Math.PI / 180F));
-            float cosYaw = MathHelper.cos(rotationDiff * ((float)Math.PI / 180F));
-
-            float newForward = originalForward * cosYaw - originalSideways * sinYaw;
-            float newSideways = originalSideways * cosYaw + originalForward * sinYaw;
-
-            // Apply small imperfections to movement occasionally to appear more human-like
-            if (Math.random() > 0.9) {
-                newForward *= 0.98f + (float)(Math.random() * 0.04f);
-                newSideways *= 0.98f + (float)(Math.random() * 0.04f);
-            }
-
-            // Apply the transformed movement
-            mc.player.input.movementForward = newForward;
-            mc.player.input.movementSideways = newSideways;
-
-            // Set the movefix context for RotationHandler
-            // Using regular "scaffold" context for both to reduce SimulationFail flags
-            RotationHandler.setMoveFixContext("scaffold");
-
-            movementModified = true;
-        }
-    }
-
-    /**
-     * Restore original movement inputs
-     */
-    private void restoreMovement() {
-        if (!movementModified || mc.player == null) return;
-
-        mc.player.input.movementForward = originalForward;
-        mc.player.input.movementSideways = originalSideways;
-        movementModified = false;
-    }
-
-    /**
-     * Called before player movement calculations
-     */
-    public void preUpdate() {
-        if (!isEnabled() || mc.player == null || mc.world == null) return;
-
-        // Track when player was last in air (not on ground)
-        if (!mc.player.isOnGround()) {
-            lastInAirTime = System.currentTimeMillis();
-        }
-
-        // Detect towering (building straight up)
-        isTowering = tower.getValue() && mc.options.jumpKey.isPressed();
-
-        // First, apply the movement fix - do this BEFORE any other logic
-        if (moveFix.getValue() && !movementModified) {
-            applyMovementFix();
-        }
-
-        // Handle safe walk (sneaking at edges)
-        handleSafeWalk();
-
-        // Apply rotations for block placement
-        if (rotations.getValue()) {
-            float targetYaw;
-            float targetPitch;
-
-            if (isTowering) {
-                // When towering, look straight down
-                targetYaw = mc.player.getYaw();
-                targetPitch = 90.0f;
-            } else {
-                // Normal scaffolding, look behind player
-                bridgeDirection = getHorizontalDirection(mc.player.getYaw());
-                targetYaw = getYawFromDirection(bridgeDirection.getOpposite());
-                targetPitch = 75.0f; // Looking down
-            }
-
-            handleRotations(targetYaw, targetPitch);
-        }
-
-        // Find placement position and place block
-        PlacementInfo placement = findPlacement();
-        if (placement != null && canPlace() && hasBlocks()) {
-            placeBlock(placement);
-
-            // Handle tower jumping with anticheat-friendly approach
-            if (isTowering && mc.player.isOnGround()) {
-                mc.player.jump();
-
-                // Add a slightly stronger boost to ensure consistent towering
-                // This is still well below what most anticheats will detect
-                if (tower.getValue()) {
-                    mc.player.addVelocity(0, 0.02f, 0);
-                }
-            }
-        }
+        // No rotations to cancel as this module doesn't force them
     }
 
     @Override
     public void onUpdate() {
-        // Run movement fix again in the main update to ensure consistent application
-        if (isEnabled() && moveFix.getValue() && mc.player != null && !movementModified) {
-            applyMovementFix();
-        }
-    }
+        if (!isEnabled() || mc.player == null || mc.world == null) return;
 
-    /**
-     * Handle rotations for block placement with better anti-detection
-     */
-    private void handleRotations(float yaw, float pitch) {
-        boolean isSilent = rotationMode.getValue().equals("Silent");
-        boolean isBody = rotationMode.getValue().equals("Body");
-        boolean useMoveFix = (isSilent || isBody) && moveFix.getValue();
+        placedThisTick = false; // Reset placement flag each tick
 
-        // IMPORTANT: Fix for AimModulo360 - ensure rotation is not exactly modulo 360
-        // Make sure rotations don't fall on exact degrees
-        float randomYaw = yaw;
-        float randomPitch = pitch;
-
-        // Intentionally make all rotations non-integer values with subtle randomization
-        if (Math.abs(randomYaw - Math.round(randomYaw)) < 0.05f) {
-            randomYaw += 0.13f;
+        // --- Tracking & Setup ---
+        if (!mc.player.isOnGround()) lastAirTime = System.currentTimeMillis();
+        lastVerticalVelocity = mc.player.getVelocity().y;
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastPlacementReset > 50) { // Reset placement cycle counter every 50ms
+            placementsThisTickCycle = 0;
+            lastPlacementReset = currentTime;
         }
 
-        if (Math.abs(randomPitch - Math.round(randomPitch)) < 0.05f) {
-            randomPitch += 0.17f;
+        // --- Movement Controls ---
+        boolean isTowering = tower.getValue() && mc.options.jumpKey.isPressed() && mc.player.getPitch() > 70; // Tower only if looking down
+        if (safeWalk.getValue() && !isTowering) {
+            BlockPos safePos = mc.player.getBlockPos().down();
+            boolean blockBelowSolid = !mc.world.getBlockState(safePos).isAir() && mc.world.getBlockState(safePos).isSolidBlock(mc.world, safePos);
+            mc.options.sneakKey.setPressed(!blockBelowSolid);
+        } else if (safeWalk.getValue() && mc.options.sneakKey.isPressed()) {
+            mc.options.sneakKey.setPressed(false);
         }
+        if (!sprint.getValue() && mc.player.isSprinting()) mc.player.setSprinting(false);
 
-        // Make sure pitch stays in valid range
-        randomPitch = MathHelper.clamp(randomPitch, -90.0f, 90.0f);
-
-        // Use a moderate hold time and speed
-        long holdTime = 100;
-        float speed = 0.6f;
-
-        if (isSilent) {
-            RotationHandler.requestRotation(
-                    randomYaw, randomPitch, ROTATION_PRIORITY, holdTime, true, false, useMoveFix, speed, null
-            );
-        } else if (isBody) {
-            RotationHandler.requestRotation(
-                    randomYaw, randomPitch, ROTATION_PRIORITY, holdTime, true, true, useMoveFix, speed, null
-            );
-        } else {
-            RotationHandler.requestRotation(
-                    randomYaw, randomPitch, ROTATION_PRIORITY, holdTime, false, false, false, speed, null
-            );
-        }
-
-        rotationsSet = true;
-    }
-
-    /**
-     * Prevents falling off edges by sneaking automatically
-     */
-    private void handleSafeWalk() {
-        if (!safeWalk.getValue()) return;
-
-        BlockPos pos = mc.player.getBlockPos().down();
-        boolean isSafeToWalk = !mc.world.getBlockState(pos).isAir();
-
-        // Only enable sneaking when over air
-        mc.options.sneakKey.setPressed(!isSafeToWalk);
-    }
-
-    /**
-     * Find place to put a block
-     */
-    private PlacementInfo findPlacement() {
-        if (mc.player == null || mc.world == null) return null;
-
-        // Get the position directly under the player
-        Vec3d playerPos = mc.player.getPos();
-        BlockPos basePos = new BlockPos(
-                MathHelper.floor(playerPos.x),
-                MathHelper.floor(playerPos.y - 0.5),
-                MathHelper.floor(playerPos.z)
-        );
-
-        // Check if we need to place a block
-        if (!mc.world.getBlockState(basePos).isAir()) {
-            return null; // Already a block here
-        }
-
-        // Try all directions to place against
-        for (Direction dir : Direction.values()) {
-            BlockPos placeAgainst = basePos.offset(dir);
-
-            // Check if we can place against this block
-            if (!mc.world.getBlockState(placeAgainst).isAir() &&
-                    mc.world.getBlockState(placeAgainst).isSolidBlock(mc.world, placeAgainst)) {
-
-                Direction placeDir = dir.getOpposite();
-
-                // Calculate hit vector
-                Vec3d hitVec = Vec3d.ofCenter(placeAgainst)
-                        .add(Vec3d.of(placeDir.getVector()).multiply(0.5));
-
-                // Check if player can reach
-                if (mc.player.getEyePos().squaredDistanceTo(hitVec) <= 25.0) { // ~5 block reach
-                    return new PlacementInfo(basePos, placeAgainst, placeDir, hitVec);
-                }
+        // --- Towering Jump --- (Simple version, might need refinement)
+        if (isTowering && mc.player.isOnGround()) {
+            long timeSinceAir = System.currentTimeMillis() - lastAirTime;
+            if (!grimBypass.getValue() || timeSinceAir > GROUND_TRANSITION_COOLDOWN) {
+                mc.player.jump();
+                lastAirTime = System.currentTimeMillis();
             }
         }
 
-        return null;
+        // --- Legit Placement Logic ---
+        if (!canPlaceBlock()) return; // Check cooldown based on delay setting
+
+        // Perform Raycast using SERVER-SIDE rotations from RotationHandler
+        Vec3d eyePos = mc.player.getEyePos();
+        float serverYaw = RotationHandler.getServerYaw();
+        float serverPitch = RotationHandler.getServerPitch();
+        Vec3d lookVec = RotationHandler.getVectorForRotation(serverPitch, serverYaw); // Assumes method exists in RotationHandler
+        Vec3d endPos = eyePos.add(lookVec.multiply(PLACEMENT_REACH));
+
+        RaycastContext context = new RaycastContext(eyePos, endPos, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, mc.player);
+        BlockHitResult raycastResult = mc.world.raycast(context);
+
+        // Check if raycast hit a valid block face
+        if (raycastResult.getType() == HitResult.Type.BLOCK) {
+            BlockPos hitBlock = raycastResult.getBlockPos();
+            Direction hitFace = raycastResult.getSide();
+            BlockPos placePos = hitBlock.offset(hitFace); // Position where the new block will go
+
+            // Check if the spot is valid to place in (replaceable, not inside player)
+            if (isValidPlacementPosition(placePos)) {
+                // Check GrimAC bypasses related to placement action
+                if (grimBypass.getValue()) {
+                    if (placementLimit.getValue() && placementsThisTickCycle >= 1) return; // Check placement limit
+                    if (antiPreFlying.getValue() && (lastVerticalVelocity > 0.1 || lastVerticalVelocity < -0.4) && !mc.player.isOnGround()) return;
+                    long timeSinceAir = System.currentTimeMillis() - lastAirTime;
+                    if (timeSinceAir < GROUND_TRANSITION_COOLDOWN && !mc.player.isOnGround() && !isTowering) return;
+                }
+
+                // Check inventory
+                int blockSlot = findBlockInHotbar();
+                if (blockSlot != -1) {
+                    // Attempt to place the block using the direct raycast result
+                    placeBlockLegit(raycastResult, blockSlot);
+                    placedThisTick = true; // Mark placement happened this tick
+                    placementsThisTickCycle++; // Increment bypass counter
+                }
+            }
+        }
+    } // End onUpdate
+
+    /**
+     * Checks if a position is valid for block placement (replaceable and not inside player)
+     */
+    private boolean isValidPlacementPosition(BlockPos pos) {
+        if (mc.world == null || mc.player == null) return false;
+        BlockState state = mc.world.getBlockState(pos);
+        if (!state.isReplaceable()) return false;
+        Box playerBox = mc.player.getBoundingBox().expand(-0.1); // Slightly shrink player box for check
+        Box blockBox = new Box(pos);
+        if (playerBox.intersects(blockBox)) return false; // Simpler intersection check
+        return true;
     }
 
     /**
-     * Simple block placement with ground state transition fix
+     * Place a block using the direct BlockHitResult from the raycast.
      */
-    private void placeBlock(PlacementInfo placement) {
+    private void placeBlockLegit(BlockHitResult raycastResult, int blockSlot) {
         if (mc.player == null || mc.interactionManager == null) return;
 
-        // Make sure rotation is active before placing
-        if (rotations.getValue() && !RotationHandler.isRotationActive()) {
-            return;
-        }
-
-        // Special handling for towering - much more permissive to ensure it works
-        boolean isToweringNow = tower.getValue() && mc.options.jumpKey.isPressed();
-
-        if (isToweringNow) {
-            // FOR TOWERING: Simplified approach - place block in almost all cases
-            // Only avoid placing when moving upward very quickly, as that's when anticheat is most sensitive
-            double verticalSpeed = mc.player.getVelocity().y;
-            if (verticalSpeed > 0.2) { // Only skip during the fastest part of the upward jump
-                return;
-            }
-
-            // Place block in all other cases, including:
-            // - On the ground
-            // - At jump peak
-            // - During fall
-            // This ensures towering always works
-        } else {
-            // NORMAL SCAFFOLDING (not towering)
-            // Regular anti-cheat protections for horizontal bridging
-
-            // 1. Never place blocks while in the air
-            if (!mc.player.isOnGround()) {
-                lastInAirTime = System.currentTimeMillis();
-                return;
-            }
-
-            // 2. Don't place blocks right after landing
-            long timeSinceInAir = System.currentTimeMillis() - lastInAirTime;
-            if (timeSinceInAir < GROUND_TRANSITION_COOLDOWN) {
-                return;
-            }
-
-            // 3. Check vertical motion to detect jumps/falls
-            double verticalSpeed = mc.player.getVelocity().y;
-
-            // "pre-flying" - about to jump or already moving upward
-            if (verticalSpeed > 0.03) {
-                return;
-            }
-
-            // "post-flying" - just landed or falling
-            if (verticalSpeed < -0.08) {
-                return;
-            }
-
-            // 4. Special creative mode checks
-            if (mc.player.getAbilities().allowFlying) {
-                // Strict ground check for creative mode
-                if (!mc.player.isOnGround() || Math.abs(verticalSpeed) > 0.02) {
-                    return;
-                }
-            }
-        }
-
-        // Cancel if sprint is active
-        if (mc.player.isSprinting()) {
-            mc.player.setSprinting(false);
-        }
-
-        // Find a block to place
-        int blockSlot = findBlockInHotbar();
-        if (blockSlot == -1) return;
-
-        int prevSlot = mc.player.getInventory().selectedSlot;
-
-        // Switch to the block slot if needed
+        // --- Find Block & Switch ---
+        int originalSlot = mc.player.getInventory().selectedSlot;
+        boolean switched = false;
         if (autoSwitch.getValue()) {
-            mc.player.getInventory().selectedSlot = blockSlot;
+            if (originalSlot != blockSlot) {
+                mc.player.getInventory().selectedSlot = blockSlot;
+                switched = true;
+            }
+        } else { // Check if current item is valid if not auto-switching
+            ItemStack currentStack = mc.player.getMainHandStack();
+            if (!(currentStack.getItem() instanceof BlockItem) || !isSuitableBlock(((BlockItem) currentStack.getItem()).getBlock())) {
+                return; // Cannot place with current item and not switching
+            }
         }
 
-        // Small randomization to hit vector to avoid DuplicateRotPlace
-        Vec3d randomizedHitVec = placement.hitVec.add(
-                (Math.random() - 0.5) * 0.002,
-                (Math.random() - 0.5) * 0.002,
-                (Math.random() - 0.5) * 0.002
-        );
-
-        // Create the block hit result
-        BlockHitResult hitResult = new BlockHitResult(
-                randomizedHitVec,
-                placement.placeDirection,
-                placement.supportPos,
-                false
-        );
-
-        // Place the block
-        mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hitResult);
-        mc.player.swingHand(Hand.MAIN_HAND);
-
-        // Reset slot if needed
-        if (autoSwitch.getValue() && prevSlot != blockSlot) {
-            mc.player.getInventory().selectedSlot = prevSlot;
+        // --- Optional Delay (Grim) ---
+        if (grimBypass.getValue() && Math.random() < 0.2) {
+            try { Thread.sleep((long)(Math.random() * 15 + 5)); }
+            catch (InterruptedException e) { Thread.currentThread().interrupt(); }
         }
 
-        // Set cooldown
-        lastPlaceTime = System.currentTimeMillis();
+        // --- Interact ---
+        Hand hand = Hand.MAIN_HAND;
+        mc.interactionManager.interactBlock(mc.player, hand, raycastResult); // Use direct raycast result
+        mc.player.swingHand(hand);
+
+        // --- Post-Interaction ---
+        lastPlaceTime = System.currentTimeMillis(); // Update cooldown timer
+        if (switched) {
+            mc.player.getInventory().selectedSlot = originalSlot; // Switch back slot
+        }
     }
 
     /**
-     * Find a block in the hotbar
+     * Check if enough time has passed since the last placement based on delay setting.
+     */
+    private boolean canPlaceBlock() {
+        long currentTime = System.currentTimeMillis();
+        long cooldown = (long)(delay.getValue() * 1000);
+        cooldown = Math.max(PLACE_COOLDOWN, cooldown); // Enforce minimum cooldown
+        // Grim bypass variation removed, simple delay check now
+        return currentTime - lastPlaceTime >= cooldown;
+    }
+
+    /**
+     * Checks if a block is suitable for scaffolding (basic blacklist).
+     */
+    private boolean isSuitableBlock(Block block) {
+        // Simplified blacklist - expand if needed
+        if (block == Blocks.AIR || block == Blocks.WATER || block == Blocks.LAVA ||
+                block.getDefaultState().hasBlockEntity() || // Most tile entities are not placeable quickly
+                block == Blocks.SAND || block == Blocks.RED_SAND || block == Blocks.GRAVEL) // Falling blocks
+        {
+            return false;
+        }
+        // Check if it's a BlockItem that is actually placeable (e.g., not slabs placed weirdly)
+        // More complex checks could go here if needed
+        return true;
+    }
+
+    /**
+     * Find the best slot in the hotbar containing suitable blocks.
      */
     private int findBlockInHotbar() {
+        if (mc.player == null) return -1;
         PlayerInventory inventory = mc.player.getInventory();
-
-        // Find blocks in hotbar
+        int bestSlot = -1; int maxCount = 0;
         for (int i = 0; i < 9; i++) {
             ItemStack stack = inventory.getStack(i);
             if (!stack.isEmpty() && stack.getItem() instanceof BlockItem) {
                 Block block = ((BlockItem) stack.getItem()).getBlock();
-
-                // Skip certain blocks that shouldn't be used for bridging
-                if (shouldAvoidBlock(block)) {
-                    continue;
+                if (isSuitableBlock(block)) {
+                    if (stack.getCount() > maxCount) { maxCount = stack.getCount(); bestSlot = i; }
                 }
-
-                return i;
             }
         }
-
-        return -1; // No suitable blocks found
+        return bestSlot;
     }
 
-    /**
-     * Check if we have blocks to place
-     */
-    private boolean hasBlocks() {
-        return findBlockInHotbar() != -1;
-    }
-
-    /**
-     * Simple cooldown check
-     */
-    private boolean canPlace() {
-        return System.currentTimeMillis() - lastPlaceTime >= PLACE_COOLDOWN;
-    }
-
-    /**
-     * Returns blocks that should be avoided for scaffolding
-     */
-    private boolean shouldAvoidBlock(Block block) {
-        return block == Blocks.TNT ||
-                block == Blocks.CHEST ||
-                block == Blocks.TRAPPED_CHEST ||
-                block == Blocks.ENDER_CHEST ||
-                block == Blocks.ANVIL ||
-                block == Blocks.ENCHANTING_TABLE ||
-                block == Blocks.SAND ||
-                block == Blocks.GRAVEL;
-    }
-
-    /**
-     * Gets a horizontal direction from a yaw angle
-     */
-    private Direction getHorizontalDirection(float yaw) {
-        yaw = MathHelper.wrapDegrees(yaw);
-        if (yaw >= -45 && yaw < 45) {
-            return Direction.SOUTH; // 0 degrees
-        } else if (yaw >= 45 && yaw < 135) {
-            return Direction.WEST; // 90 degrees
-        } else if (yaw >= 135 || yaw < -135) {
-            return Direction.NORTH; // 180 degrees
-        } else {
-            return Direction.EAST; // 270 degrees
-        }
-    }
-
-    /**
-     * Gets the yaw angle for a specific direction
-     */
-    private float getYawFromDirection(Direction dir) {
-        switch (dir) {
-            case SOUTH: return 0;
-            case WEST: return 90;
-            case NORTH: return 180;
-            case EAST: return -90;
-            default: return 0;
-        }
-    }
-
-    /**
-     * Check if sprint is allowed (for integration with Sprint module)
-     */
+    // --- Other Module Interaction Methods ---
+    // Removed: isMovingFixEnabled (as moveFix setting is removed)
+    // Keep isSprintAllowed
     public boolean isSprintAllowed() {
-        return false; // Disable sprint while scaffolding for more stable movement
+        return isEnabled() && sprint.getValue();
     }
 
-    /**
-     * Data class for block placement information
-     */
-    private static class PlacementInfo {
-        private final BlockPos targetPos;      // Where the block will be placed
-        private final BlockPos supportPos;     // The block we're placing against
-        private final Direction placeDirection; // The face of the support block
-        private final Vec3d hitVec;            // The exact point to click
-
-        public PlacementInfo(BlockPos targetPos, BlockPos supportPos,
-                             Direction placeDirection, Vec3d hitVec) {
-            this.targetPos = targetPos;
-            this.supportPos = supportPos;
-            this.placeDirection = placeDirection;
-            this.hitVec = hitVec;
-        }
-    }
+    // Removed unused methods like getTargetBlockPos, findPlacementDirection, getHorizontalDirection, getYawFromDirection, applyRotations etc.
 }

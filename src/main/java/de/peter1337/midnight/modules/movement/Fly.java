@@ -61,7 +61,7 @@ public class Fly extends Module {
             return baseVelocity.add(0, -0.04, 0);
         } else {
             // Move slightly up
-            return baseVelocity.add(0, 0.04, 0);
+            return baseVelocity.add(0, 6.04, 0);
         }
     }
 

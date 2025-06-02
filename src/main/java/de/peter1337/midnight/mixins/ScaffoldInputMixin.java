@@ -15,10 +15,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  */
 @Mixin(KeyboardInput.class)
 public class ScaffoldInputMixin {
+}
+
 
     /**
      * Inject at the end of the tick method to reverse inputs when scaffolding
-     */
+
     @Inject(method = "tick", at = @At("TAIL"))
     private void onInputTick(CallbackInfo ci) {
         // Get the current input instance
@@ -41,3 +43,4 @@ public class ScaffoldInputMixin {
             }
         }
     }
+     */
