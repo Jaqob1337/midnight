@@ -2,6 +2,7 @@ package de.peter1337.midnight.manager;
 
 import de.peter1337.midnight.modules.Module;
 import de.peter1337.midnight.modules.combat.Aura;
+import de.peter1337.midnight.modules.movement.BloxdMove;
 import de.peter1337.midnight.modules.movement.Fly;
 import de.peter1337.midnight.modules.movement.Speed;
 import de.peter1337.midnight.modules.movement.Sprint;
@@ -32,6 +33,7 @@ public class ModuleManager {
         registerModule(new NoSlow());
         registerModule(new Scaffold());
         registerModule(new Fly());
+        registerModule(new BloxdMove());
     }
 
     private static void registerModule(Module module) {
