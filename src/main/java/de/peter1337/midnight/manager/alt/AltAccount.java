@@ -1,24 +1,43 @@
 package de.peter1337.midnight.manager.alt;
 
 public class AltAccount {
-    private final String username;
-    private final String password; // For cracked accounts, may be empty
 
-    public AltAccount(String username, String password) {
-        this.username = username;
-        this.password = password;
+    public enum Type {
+        CRACKED,
+        MICROSOFT
     }
 
-    // Overloaded constructor for cracked accounts (no password)
+    private final String username;
+    private String refreshToken;
+    private final Type type;
+
+    // For cracked accounts
     public AltAccount(String username) {
-        this(username, "");
+        this.username = username;
+        this.type = Type.CRACKED;
+        this.refreshToken = "";
+    }
+
+    // For Microsoft accounts
+    public AltAccount(String username, String refreshToken) {
+        this.username = username;
+        this.refreshToken = refreshToken;
+        this.type = Type.MICROSOFT;
     }
 
     public String getUsername() {
         return username;
     }
 
-    public String getPassword() {
-        return password;
+    public String getRefreshToken() {
+        return refreshToken;
+    }
+
+    public void setRefreshToken(String refreshToken) {
+        this.refreshToken = refreshToken;
+    }
+
+    public Type getType() {
+        return type;
     }
 }

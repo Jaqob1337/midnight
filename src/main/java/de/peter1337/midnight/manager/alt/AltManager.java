@@ -1,7 +1,9 @@
 package de.peter1337.midnight.manager.alt;
 
+import de.peter1337.midnight.utils.MicrosoftAuthenticator;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.session.Session;
+
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
@@ -19,36 +21,45 @@ public class AltManager {
         return altAccounts;
     }
 
-    /**
-     * Logs in using the specified AltAccount by replacing the MinecraftClient's session.
-     * This method uses reflection because there is no public setSession method.
-     *
-     * @param alt the AltAccount to log in with
-     */
     public static void login(AltAccount alt) {
-        MinecraftClient client = MinecraftClient.getInstance();
+        Session session;
+        if (alt.getType() == AltAccount.Type.MICROSOFT) {
+            try {
+                // Call the authenticator which returns an AuthResult object
+                MicrosoftAuthenticator.AuthResult authResult = MicrosoftAuthenticator.loginWithMicrosoft(alt.getRefreshToken());
+
+                // Extract the session from the result
+                session = authResult.session;
+
+                // IMPORTANT: Update the account with the new refresh token for the next login
+                alt.setRefreshToken(authResult.refreshToken);
+            } catch (Exception e) {
+                e.printStackTrace();
+                // We could add a status message here to show the login failed.
+                return;
+            }
+        } else { // CRACKED
+            session = new Session(
+                    alt.getUsername(),
+                    UUID.nameUUIDFromBytes(("OfflinePlayer:" + alt.getUsername()).getBytes()),
+                    "0", // No access token for cracked
+                    Optional.empty(),
+                    Optional.empty(),
+                    Session.AccountType.LEGACY);
+        }
+
+        setSession(session);
+    }
+
+    private static void setSession(Session session) {
         try {
-            // Use reflection to access the private "session" field.
+            // Use reflection to set the session, as there is no public setter
             Field sessionField = MinecraftClient.class.getDeclaredField("session");
             sessionField.setAccessible(true);
-            // Create a new offline session:
-            // - profileId: we use the username
-            // - UUID: generated from the username
-            // - username: alt.getUsername()
-            // - accessToken: Optional.empty()
-            // - sessionToken: Optional.empty()
-            // - accountType: Session.AccountType.LEGACY
-            Session newSession = new Session(
-                    alt.getUsername(),
-                    UUID.nameUUIDFromBytes(alt.getUsername().getBytes()),
-                    alt.getUsername(),
-                    Optional.empty(),
-                    Optional.empty(),
-                    Session.AccountType.LEGACY
-            );
-            sessionField.set(client, newSession);
+            sessionField.set(MinecraftClient.getInstance(), session);
         } catch (NoSuchFieldException | IllegalAccessException e) {
-            e.printStackTrace();
+            // This would be a critical error if it happens
+            throw new RuntimeException("Failed to set Minecraft session", e);
         }
     }
 }
